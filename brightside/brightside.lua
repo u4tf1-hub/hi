@@ -1,6 +1,6 @@
 -- ==========================================================
 --  BRIGHTSIDE V1 - FINAL SOURCE
---  Features: Panic Ground, Anti Trip, Headless, Korblox
+--  Features: Panic Ground, Anti Trip, Headless, Korblox, Spiderman
 --  Game: Da Hood (2788229376)
 -- ==========================================================
 
@@ -29,6 +29,12 @@ local TriggerbotActive = false
 local LastShot = 0
 local RapidFireActive = false
 local RapidFireLastFire = 0
+
+-- Spiderman States
+local LastJumpTime = 0
+local CanWallJump = false
+local LastWallJumpTime = 0
+local JumpCount = 0
 
 -- ==========================================================
 --  UTILITY FUNCTIONS
@@ -124,7 +130,6 @@ local function findGroundPosition()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
     
-    -- Raycast down to find ground
     local rayOrigin = hrp.Position
     local rayDirection = Vector3.new(0, -500, 0)
     local raycastParams = RaycastParams.new()
@@ -136,7 +141,6 @@ local function findGroundPosition()
         return result.Position + Vector3.new(0, 3, 0)
     end
     
-    -- Fallback: Find nearest baseplate/floor
     for _, v in pairs(Workspace:GetDescendants()) do
         if v:IsA("BasePart") and v.Name:lower():match("baseplate") or v.Name:lower():match("floor") then
             local dist = (hrp.Position - v.Position).Magnitude
@@ -217,10 +221,8 @@ local function applyAntiTrip()
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     
-    -- Prevent tripping by keeping AutoRotate true and resetting state
     hum.AutoRotate = true
     
-    -- Check for trip/fall states and immediately recover
     if hum:GetState() == Enum.HumanoidStateType.FallingDown or 
        hum:GetState() == Enum.HumanoidStateType.Ragdoll or
        hum.PlatformStand then
@@ -229,7 +231,6 @@ local function applyAntiTrip()
         hum:ChangeState(Enum.HumanoidStateType.GettingUp)
         hum:ChangeState(Enum.HumanoidStateType.Running)
         
-        -- Reset velocity if falling/tripping
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if hrp then
             hrp.AssemblyLinearVelocity = Vector3.new(
@@ -242,7 +243,7 @@ local function applyAntiTrip()
 end
 
 -- ==========================================================
---  HEADLESS & KORBLOX SYSTEM
+--  HEADLESS & KORBLOX SYSTEM (FIXED)
 -- ==========================================================
 local function applyHeadless()
     if not Surge['Extra']['Headless'] then return end
@@ -253,18 +254,15 @@ local function applyHeadless()
     local head = char:FindFirstChild("Head")
     if not head then return end
     
-    -- Make head invisible and small (classic headless look)
     head.Transparency = 1
     head.Size = Vector3.new(1, 0.5, 1)
     
-    -- Hide face accessories
     for _, v in pairs(head:GetChildren()) do
         if v:IsA("Decal") or v:IsA("Texture") then
             v.Transparency = 1
         end
     end
     
-    -- Hide head accessories
     for _, v in pairs(char:GetChildren()) do
         if v:IsA("Accessory") and v:FindFirstChild("Handle") then
             local handle = v.Handle
@@ -275,29 +273,54 @@ local function applyHeadless()
     end
 end
 
+-- FIXED: Real Korblox using MeshId
 local function applyKorblox()
     if not Surge['Extra']['Korblox'] then return end
     
     local char = LocalPlayer.Character
     if not char then return end
     
-    -- Find right leg
     local rightLeg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightLowerLeg")
     if not rightLeg then return end
     
-    -- Make leg invisible (Korblox skeleton leg look)
+    -- Check if already applied
+    if rightLeg:FindFirstChild("KorbloxMesh") then return end
+    
+    -- Hide original leg
     rightLeg.Transparency = 1
     
-    -- Hide right leg accessories/shoes
+    -- Create Korblox leg using the actual asset
+    local korbloxLeg = Instance.new("Part")
+    korbloxLeg.Name = "KorbloxLeg"
+    korbloxLeg.Size = Vector3.new(1, 2, 1)
+    korbloxLeg.CanCollide = false
+    korbloxLeg.Transparency = 0
+    
+    -- Apply Korblox mesh
+    local mesh = Instance.new("SpecialMesh")
+    mesh.Name = "KorbloxMesh"
+    mesh.MeshId = "http://www.roblox.com/asset/?id=139607718"
+    mesh.TextureId = "http://www.roblox.com/asset/?id=139607805"
+    mesh.Scale = Vector3.new(1.05, 1.05, 1.05)
+    mesh.Parent = korbloxLeg
+    
+    -- Weld to character
+    local weld = Instance.new("Weld")
+    weld.Part0 = rightLeg
+    weld.Part1 = korbloxLeg
+    weld.C0 = CFrame.new(0, 0, 0)
+    weld.Parent = korbloxLeg
+    
+    korbloxLeg.Parent = char
+    
+    -- Hide right leg accessories
     for _, v in pairs(char:GetChildren()) do
         if v:IsA("Accessory") and v:FindFirstChild("Handle") then
             local handle = v.Handle
-            -- Check if accessory is on right leg (approximate by position)
             if handle then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     local relativePos = handle.Position - hrp.Position
-                    -- Right side and lower body
                     if relativePos.X > 0.5 and relativePos.Y < 0 then
                         handle.Transparency = 1
                     end
@@ -305,9 +328,6 @@ local function applyKorblox()
             end
         end
     end
-    
-    -- Alternative: Create fake Korblox mesh if you have the asset
-    -- This would require the actual Korblox mesh ID
 end
 
 local function applyExtraVisuals()
@@ -316,7 +336,106 @@ local function applyExtraVisuals()
 end
 
 -- ==========================================================
---  RAPID FIRE SYSTEM (FIXED - Ultra Low Delay)
+--  SPIDERMAN WALL JUMP SYSTEM
+-- ==========================================================
+local function isNearWall()
+    local char = LocalPlayer.Character
+    if not char then return false, nil end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false, nil end
+    
+    local wallDistance = Surge['Spiderman']['Wall Distance'] or 6
+    
+    -- Raycast in 4 directions to find walls
+    local directions = {
+        hrp.CFrame.RightVector,
+        -hrp.CFrame.RightVector,
+        hrp.CFrame.LookVector,
+        -hrp.CFrame.LookVector
+    }
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {char}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    for _, dir in ipairs(directions) do
+        local result = Workspace:Raycast(hrp.Position, dir * wallDistance, raycastParams)
+        if result and result.Instance then
+            -- Check if it's a valid wall (not another player)
+            if not result.Instance:IsDescendantOf(Workspace:FindFirstChild("Characters") or Workspace) then
+                return true, result.Normal
+            end
+        end
+    end
+    
+    return false, nil
+end
+
+local function hasKnifeEquipped()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    
+    local tool = char:FindFirstChildOfClass("Tool")
+    if tool then
+        local toolName = tool.Name:lower()
+        return toolName:match("knife") or toolName:match("blade")
+    end
+    return false
+end
+
+local function performWallJump()
+    if not Surge['Spiderman']['Enabled'] then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return end
+    
+    local now = tick()
+    local cooldown = Surge['Spiderman']['Cooldown'] or 0.2
+    
+    if now - LastWallJumpTime < cooldown then return end
+    
+    local nearWall, wallNormal = isNearWall()
+    if not nearWall then return end
+    
+    -- Check if in air (FloorMaterial is Air)
+    if hum.FloorMaterial ~= Enum.Material.Air then return end
+    
+    -- Determine jump power
+    local jumpPower = Surge['Spiderman']['Jump Power'] or 100
+    if hasKnifeEquipped() then
+        jumpPower = Surge['Spiderman']['Knife Jump Power'] or 150
+    end
+    
+    -- Calculate jump direction (away from wall + up)
+    local jumpDirection = Vector3.new(0, 1, 0)
+    if wallNormal then
+        jumpDirection = (wallNormal * 0.6 + Vector3.new(0, 0.8, 0)).Unit
+    end
+    
+    -- Apply velocity
+    hrp.AssemblyLinearVelocity = Vector3.new(
+        hrp.AssemblyLinearVelocity.X * 0.3,
+        0,
+        hrp.AssemblyLinearVelocity.Z * 0.3
+    )
+    
+    task.wait(0.01)
+    
+    hrp.AssemblyLinearVelocity = jumpDirection * jumpPower
+    
+    LastWallJumpTime = now
+    JumpCount = JumpCount + 1
+    
+    print("[Spiderman] Wall jump! Power:", jumpPower)
+end
+
+-- ==========================================================
+--  RAPID FIRE SYSTEM
 -- ==========================================================
 local function getGun()
     local char = LocalPlayer.Character
@@ -475,7 +594,6 @@ local function UpdateESP()
         local boxCol = isTarget and targetColor or Surge['Raid Awareness']['Box']['Other Color']
         local nameCol = isTarget and targetColor or Surge['Raid Awareness']['Name']['Other Color']
         
-        -- Box
         local headPos = hrp.Position + Vector3.new(0,6,0)
         local headScreen = Camera:WorldToViewportPoint(headPos)
         if headScreen.Z > 0 then
@@ -497,7 +615,6 @@ local function UpdateESP()
             end
         end
         
-        -- Name
         if Surge['Raid Awareness']['Name']['Enabled'] then
             local t = Surge['Raid Awareness']['Name']['Type'] or 'Display'
             drawings.Name.Text = t == 'Display' and player.DisplayName or player.Name
@@ -508,7 +625,6 @@ local function UpdateESP()
             drawings.Name.Visible = false
         end
         
-        -- Tracer
         if Surge['Raid Awareness']['Tracer']['Enabled'] then
             drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
             drawings.Tracer.To = sp
@@ -518,7 +634,6 @@ local function UpdateESP()
             drawings.Tracer.Visible = false
         end
         
-        -- Distance
         if Surge['Raid Awareness']['Distance']['Enabled'] and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
             local d = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
             drawings.Distance.Text = math.floor(d) .. " studs"
@@ -640,6 +755,29 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
+    -- NEW: Spiderman Wall Jump (Space while near wall)
+    if input.KeyCode == Enum.KeyCode.Space then
+        if Surge['Spiderman']['Enabled'] then
+            local now = tick()
+            
+            -- Double jump detection
+            if now - LastJumpTime < 0.4 then
+                JumpCount = JumpCount + 1
+            else
+                JumpCount = 1
+            end
+            
+            LastJumpTime = now
+            
+            -- Perform wall jump on second jump near wall
+            if JumpCount >= 2 or not Surge['Spiderman']['Require Double Jump'] then
+                performWallJump()
+                JumpCount = 0
+            end
+        end
+        return
+    end
+    
     -- Panic Key
     local panicKey = getKeyCodeFromString(Keybinds['Panic'] or 'L')
     if panicKey and input.KeyCode == panicKey then
@@ -684,10 +822,10 @@ RunService.RenderStepped:Connect(function()
     -- Triggerbot
     performTriggerbot()
     
-    -- NEW: Anti Trip
+    -- Anti Trip
     applyAntiTrip()
     
-    -- NEW: Extra Visuals (Headless/Korblox)
+    -- Extra Visuals (Headless/Korblox)
     applyExtraVisuals()
 end)
 
@@ -733,11 +871,11 @@ setreadonly(mt, true)
 
 print("Brightside Core Loaded!")
 print("Target Mode:", Surge['Target']['Type'])
-print("Features: Panic Ground, Anti Trip, Headless, Korblox")
+print("Features: Panic Ground, Anti Trip, Headless, Korblox, Spiderman")
 print("Loading external features...")
 
 -- ==========================================================
---  LOAD EXTERNAL SCRIPT (Speed, Aim Assist, etc)
+--  LOAD EXTERNAL SCRIPT
 -- ==========================================================
 task.spawn(function()
     local success, err = pcall(function()
