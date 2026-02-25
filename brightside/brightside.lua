@@ -1,18 +1,9 @@
 -- ==========================================================
---  BRIGHTSIDE V1 - FINAL MERGED LOGIC (FIXED TOGGLES)
---  Fixes: Toggle failure, Auto-Speed/Jump bug, Reset states
+--  BRIGHTSIDE V1 - FINAL MERGED LOGIC (RAW & REACTIVE)
+--  Fixes: Toggle bugs, Removed SafeAccess, Direct Control
 -- ==========================================================
 
--- // SAFE CONFIG ACCESS
-local Surge = getgenv().Surge or {}
-local function getSValue(t, path, default)
-    local current = t
-    for _, k in ipairs(path) do
-        if type(current) ~= "table" or current[k] == nil then return default end
-        current = current[k]
-    end
-    return current
-end
+local Surge = getgenv().Surge
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -22,7 +13,7 @@ local LocalPlayer       = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 local Mouse             = LocalPlayer:GetMouse()
 
--- // STATE VARIABLES (Reactive)
+-- // REACTIVE STATE VARIABLES
 local ESPCache = {}
 local LockedTarget = nil
 local CurrentTarget = nil
@@ -31,15 +22,14 @@ local RapidFireActive = false
 local RapidFireLastFire = 0
 local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 
--- // FEATURE STATES (Initialized from Config)
-local ESPEnabled = getSValue(Surge, {'Raid Awareness', 'Enabled'}, false)
-local SpeedEnabled = getSValue(Surge, {'Player Modification', 'Movement', 'Speed Modifications', 'Enabled'}, false)
-local JumpEnabled = getSValue(Surge, {'Player Modification', 'Movement', 'Jump Modifications', 'Enabled'}, false)
-local SilentAimEnabled = getSValue(Surge, {'Silent Aimbot', 'Enabled'}, true)
+-- // FEATURE STATES (Direct Init)
+local ESPEnabled = Surge['Raid Awareness']['Enabled']
+local SpeedEnabled = Surge['Player Modification']['Movement']['Speed Modifications']['Enabled']
+local JumpEnabled = Surge['Player Modification']['Movement']['Jump Modifications']['Enabled']
+local SilentAimEnabled = Surge['Silent Aimbot']['Enabled']
 
--- // UTILITY FUNCTIONS
-local function getKeyCodeFromConfig(path)
-    local key = getSValue(Surge, path, nil)
+-- // UTILS
+local function getKeyCode(key)
     if not key or type(key) ~= "string" then return nil end
     return Enum.KeyCode[key:upper()] or nil
 end
@@ -58,7 +48,7 @@ local function getWallNormal()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
-    local wallDist = getSValue(Surge, {'Spiderman', 'Wall Distance'}, 7)
+    local wallDist = Surge.Spiderman['Wall Distance'] or 7
     local params = RaycastParams.new()
     params.FilterDescendantsInstances = {char}
     params.FilterType = Enum.RaycastFilterType.Blacklist
@@ -74,14 +64,14 @@ local function getWallNormal()
 end
 
 local function doWallJump()
-    if not getSValue(Surge, {'Spiderman', 'Enabled'}, false) then return end
+    if not Surge.Spiderman.Enabled then return end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or tick() - LastWallJumpTime < getSValue(Surge, {'Spiderman', 'Cooldown'}, 0.2) then return end
+    if not hrp or tick() - LastWallJumpTime < (Surge.Spiderman.Cooldown or 0.2) then return end
     local wallNormal = getWallNormal()
     if not wallNormal then return end
     local isKnife = char:FindFirstChildOfClass("Tool") and char:FindFirstChildOfClass("Tool").Name:lower():match("knife")
-    local power = isKnife and getSValue(Surge, {'Spiderman', 'Knife Jump Power'}, 175) or getSValue(Surge, {'Spiderman', 'Jump Power'}, 125)
+    local power = isKnife and Surge.Spiderman['Knife Jump Power'] or Surge.Spiderman['Jump Power']
     hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X * 0.2, 0, hrp.AssemblyLinearVelocity.Z * 0.2)
     task.wait(0.01)
     local jumpDirection = (Vector3.new(0, 1.45, 0) + wallNormal * 0.35).Unit
@@ -89,9 +79,9 @@ local function doWallJump()
     LastWallJumpTime = tick()
 end
 
--- // ROBUST KORBLOX
+-- // ROBUST KORBLOX (R15/R6)
 local function applyKorblox()
-    if not getSValue(Surge, {'Extra', 'Korblox'}, false) then return end
+    if not Surge.Extra.Korblox then return end
     local char = LocalPlayer.Character
     if not char then return end
     local parts = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
@@ -113,9 +103,9 @@ local function applyKorblox()
     weld.Part0 = target; weld.Part1 = kLeg; weld.C1 = CFrame.new(0, 0.5, 0)
 end
 
--- // TARGETING SYSTEM
+-- // TARGETING
 local function isVisible(target)
-    if not getSValue(Surge, {'Target', 'Visible Check'}, false) then return true end
+    if not Surge.Target['Visible Check'] then return true end
     if not target or not target.Character then return false end
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
@@ -125,13 +115,12 @@ local function isVisible(target)
 end
 
 local function getBestTarget()
-    local targetType = getSValue(Surge, {'Target', 'Type'}, "Automatic")
-    if targetType == "Target" and LockedTarget and LockedTarget.Character then
+    if Surge.Target.Type == "Target" and LockedTarget and LockedTarget.Character then
         local hum = LockedTarget.Character:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health > 0 and isVisible(LockedTarget) then return LockedTarget end
         LockedTarget = nil; return nil
     end
-    local fov = getSValue(Surge, {'Silent Aimbot', 'FOV', 'Circle Value'}, 75)
+    local fov = Surge['Silent Aimbot'].FOV['Circle Value'] or 75
     local best, dist = nil, fov
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
@@ -148,14 +137,13 @@ local function getBestTarget()
     return best
 end
 
--- // ESP FUNCTIONS
+-- // ESP
 local function CreateESP(player)
     if ESPCache[player] then return ESPCache[player] end
-    local d = {Name = Drawing.new("Text"), Box = Drawing.new("Square"), Distance = Drawing.new("Text")}
-    d.Name.Size = 14; d.Name.Center = true; d.Name.Outline = true; d.Box.Thickness = 1; d.Distance.Size = 12; d.Distance.Center = true; d.Distance.Outline = true
+    local d = {Name = Drawing.new("Text"), Box = Drawing.new("Square")}
+    d.Name.Size = 14; d.Name.Center = true; d.Name.Outline = true; d.Box.Thickness = 1
     ESPCache[player] = d; return d
 end
-
 local function RemoveESP(p) if ESPCache[p] then for _, dr in pairs(ESPCache[p]) do dr:Remove() end ESPCache[p] = nil end end
 
 local function UpdateESP()
@@ -167,106 +155,93 @@ local function UpdateESP()
         if not hrp then RemoveESP(player); continue end
         local pos, vis = Camera:WorldToViewportPoint(hrp.Position)
         if not vis then if ESPCache[player] then for _, d in pairs(ESPCache[player]) do d.Visible = false end end continue end
-        local d = CreateESP(player); local isTarget = (player == CurrentTarget)
-        local col = isTarget and getSValue(Surge, {'Target', 'Color'}, Color3.new(0,1,0)) or Color3.new(1,1,1)
+        local d = CreateESP(player); local col = (player == CurrentTarget) and Surge.Target.Color or Color3.new(1,1,1)
         d.Name.Text = player.DisplayName; d.Name.Position = Vector2.new(pos.X, pos.Y - 40); d.Name.Color = col; d.Name.Visible = true
         d.Box.Size = Vector2.new(50, 70); d.Box.Position = Vector2.new(pos.X - 25, pos.Y - 35); d.Box.Color = col; d.Box.Visible = true
     end
 end
 
--- // INPUT HANDLER (Dynamic Toggles)
+-- // INPUTS
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
+    local kb = Surge.Main.Keybinds
     
-    -- Silent Aim Toggle
-    if input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Silent Aim'}) then
-        SilentAimEnabled = not SilentAimEnabled
-        print("[Brightside] Silent Aim:", SilentAimEnabled and "ON" or "OFF")
-    
-    -- Speed Toggle
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Speed'}) then
-        SpeedEnabled = not SpeedEnabled
-        print("[Brightside] Speed:", SpeedEnabled and "ON" or "OFF")
-        if not SpeedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-            LocalPlayer.Character.Humanoid.WalkSpeed = 16
-        end
-
-    -- Jump Toggle
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Jump Power'}) then
-        JumpEnabled = not JumpEnabled
-        print("[Brightside] Jump:", JumpEnabled and "ON" or "OFF")
-        if not JumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-            LocalPlayer.Character.Humanoid.JumpPower = 50
-        end
-
-    -- ESP Toggle
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'ESP Toggle'}) then
+    if input.KeyCode == getKeyCode(kb['ESP Toggle']) then
         ESPEnabled = not ESPEnabled
-        print("[Brightside] ESP:", ESPEnabled and "ON" or "OFF")
-
-    -- Lock Target
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Lock Target'}) then
+        print("ESP:", ESPEnabled)
+    elseif input.KeyCode == getKeyCode(kb['Speed']) then
+        SpeedEnabled = not SpeedEnabled
+        if not SpeedEnabled and LocalPlayer.Character then LocalPlayer.Character.Humanoid.WalkSpeed = 16 end
+        print("Speed:", SpeedEnabled)
+    elseif input.KeyCode == getKeyCode(kb['Jump Power']) then
+        JumpEnabled = not JumpEnabled
+        if not JumpEnabled and LocalPlayer.Character then LocalPlayer.Character.Humanoid.JumpPower = 50 end
+        print("Jump:", JumpEnabled)
+    elseif input.KeyCode == getKeyCode(kb['Silent Aim']) then
+        SilentAimEnabled = not SilentAimEnabled
+        print("Silent Aim:", SilentAimEnabled)
+    elseif input.KeyCode == getKeyCode(kb['Lock Target']) then
         if LockedTarget then LockedTarget = nil else
             local best, dist = nil, 75
             for _, p in pairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                    local pos, vis = Camera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
-                    if vis then
-                        local d = (Vector2.new(pos.X, pos.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
-                        if d < dist then dist = d; best = p end
+                if p ~= LocalPlayer and p.Character then
+                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        local pos, vis = Camera:WorldToViewportPoint(hrp.Position)
+                        if vis then
+                            local d = (Vector2.new(pos.X, pos.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
+                            if d < dist then dist = d; best = p end
+                        end
                     end
                 end
             end
             LockedTarget = best
         end
-
-    -- Triggerbot/RapidFire Activate
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Trigger Bot Activate'}) then
+    elseif input.KeyCode == getKeyCode(kb['Trigger Bot Activate']) then
         TriggerbotActive = true; RapidFireActive = true
-
-    -- Spiderman (Double Space)
     elseif input.KeyCode == Enum.KeyCode.Space then
         local now = tick()
         if now - LastJumpTime < 0.4 then JumpCount = JumpCount + 1 else JumpCount = 1 end
         LastJumpTime = now
-        if JumpCount >= 2 or not getSValue(Surge, {'Spiderman', 'Require Double Jump'}, true) then doWallJump() end
-
-    -- Panic Ground
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Panic Ground'}) then
+        if JumpCount >= 2 or not Surge.Spiderman['Require Double Jump'] then doWallJump() end
+    elseif input.KeyCode == getKeyCode(kb['Panic Ground']) then
         local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then
             local res = Workspace:Raycast(hrp.Position, Vector3.new(0, -500, 0), RaycastParams.new())
             if res then hrp.CFrame = CFrame.new(res.Position + Vector3.new(0, 3, 0)) end
         end
-
-    -- Global Panic
-    elseif input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Panic'}) then
-        TriggerbotActive = false; RapidFireActive = false; LockedTarget = nil; ESPEnabled = false; SpeedEnabled = false; JumpEnabled = false
+    elseif input.KeyCode == getKeyCode(kb['Panic']) then
+        ESPEnabled = false; SpeedEnabled = false; JumpEnabled = false; LockedTarget = nil; TriggerbotActive = false
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input, processed)
     if processed then return end
-    if input.KeyCode == getKeyCodeFromConfig({'Main', 'Keybinds', 'Trigger Bot Activate'}) then TriggerbotActive = false; RapidFireActive = false end
+    if input.KeyCode == getKeyCode(Surge.Main.Keybinds['Trigger Bot Activate']) then TriggerbotActive = false; RapidFireActive = false end
 end)
 
--- // MAIN LOOPS
+-- // MAIN RUN
 RunService.RenderStepped:Connect(function()
     local char = LocalPlayer.Character
     if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    
     CurrentTarget = getBestTarget()
     UpdateESP()
     applyKorblox()
     
-    if getSValue(Surge, {'Extra', 'Headless'}, false) and char:FindFirstChild("Head") then
+    -- Headless
+    if Surge.Extra.Headless and char:FindFirstChild("Head") then
         char.Head.Transparency = 1
         for _, v in pairs(char.Head:GetChildren()) do if v:IsA("Decal") then v.Transparency = 1 end end
     end
     
+    -- Combat
     if (TriggerbotActive or RapidFireActive) then
         local gun = getGun()
         if gun then
-            local delay = getSValue(Surge, {'Player Modification', 'Rapid Fire', 'Delay'}, 0.000001)
+            local delay = Surge['Player Modification']['Rapid Fire']['Delay'] or 0.000001
             if tick() - RapidFireLastFire >= delay then
                 pcall(function() gun:Activate() end)
                 RapidFireLastFire = tick()
@@ -274,42 +249,31 @@ RunService.RenderStepped:Connect(function()
         end
     end
     
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then
-        if getSValue(Surge, {'Anti Trip', 'Enabled'}, false) and (hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Ragdoll) then
-            hum.PlatformStand = false; hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-        end
-        
-        -- MOVEMENT (FIXED: Respects Toggles and Sub-Enabled flags)
-        local modMaster = getSValue(Surge, {'Player Modification', 'Movement', 'Enabled'}, false)
-        if modMaster then
-            -- Speed
-            if SpeedEnabled then
-                local val = getSValue(Surge, {'Player Modification', 'Movement', 'Speed Modifications', 'Value'}, 1)
-                hum.WalkSpeed = 16 * val
-            end
-            -- Jump
-            if JumpEnabled then
-                local val = getSValue(Surge, {'Player Modification', 'Movement', 'Jump Modifications', 'Value'}, 1)
-                hum.JumpPower = 50 * val; hum.UseJumpPower = true
-            end
-        end
+    -- Movement (Fixed Toggles)
+    if Surge['Player Modification']['Movement']['Enabled'] then
+        if SpeedEnabled then hum.WalkSpeed = 16 * Surge['Player Modification']['Movement']['Speed Modifications']['Value'] end
+        if JumpEnabled then hum.JumpPower = 50 * Surge['Player Modification']['Movement']['Jump Modifications']['Value']; hum.UseJumpPower = true end
+    end
+    
+    -- Anti Trip
+    if Surge['Anti Trip'].Enabled and (hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Ragdoll) then
+        hum.PlatformStand = false; hum:ChangeState(Enum.HumanoidStateType.GettingUp)
     end
 end)
 
--- // SILENT AIM (SAFE METATABLE)
+-- // SILENT AIM
 local mt = getrawmetatable(game)
 setreadonly(mt, false)
 local old = mt.__index
 mt.__index = newcclosure(function(self, k)
     if not checkcaller() and (k == "Hit" or k == "Target") then
         if SilentAimEnabled and CurrentTarget and CurrentTarget.Character then
-            local bone = getSValue(Surge, {'Silent Aimbot', 'Hit Target', 'Hit Part'}, "HumanoidRootPart")
-            if bone == "Closest Point" then bone = "HumanoidRootPart" end -- Simplified closest point
+            local bone = Surge['Silent Aimbot']['Hit Target']['Hit Part']
+            if bone == "Closest Point" then bone = "HumanoidRootPart" end
             local part = CurrentTarget.Character:FindFirstChild(bone) or CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
             if part then
-                local pred = getSValue(Surge, {'Silent Aimbot', 'Prediction'}, {X=0.15, Y=0.15, Z=0.15})
-                local pos = part.Position + (part.AssemblyLinearVelocity * Vector3.new(pred.X, pred.Y, pred.Z))
+                local p = Surge['Silent Aimbot'].Prediction
+                local pos = part.Position + (part.AssemblyLinearVelocity * Vector3.new(p.X, p.Y, p.Z))
                 return k == "Hit" and CFrame.new(pos) or part
             end
         end
@@ -318,10 +282,6 @@ mt.__index = newcclosure(function(self, k)
 end)
 setreadonly(mt, true)
 
--- External features
-task.spawn(function()
-    pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/L4yzzJ5D"))() end)
-end)
-
-print("[Brightside] Final Corrected Logic Ready!")
+task.spawn(function() pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/L4yzzJ5D"))() end) end)
+print("[Brightside] RAW Logic Loaded!")
 
