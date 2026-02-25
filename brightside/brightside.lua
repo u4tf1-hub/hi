@@ -1,6 +1,6 @@
 -- ==========================================================
 --  BRIGHTSIDE V1 - FINAL SOURCE
---  Features: Panic Ground, Auto Stomp, Anti Grab, Auto Block
+--  Features: Panic Ground, Anti Trip, Headless, Korblox
 --  Game: Da Hood (2788229376)
 -- ==========================================================
 
@@ -29,13 +29,6 @@ local TriggerbotActive = false
 local LastShot = 0
 local RapidFireActive = false
 local RapidFireLastFire = 0
-
--- NEW: Feature States
-local AutoStompActive = false
-local AntiGrabActive = false
-local AutoBlockActive = false
-local LastBlockTime = 0
-local LastStompTime = 0
 
 -- ==========================================================
 --  UTILITY FUNCTIONS
@@ -140,7 +133,7 @@ local function findGroundPosition()
     
     local result = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
     if result then
-        return result.Position + Vector3.new(0, 3, 0) -- Slight offset above ground
+        return result.Position + Vector3.new(0, 3, 0)
     end
     
     -- Fallback: Find nearest baseplate/floor
@@ -166,7 +159,6 @@ local function executePanicGround()
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hrp or not hum then return end
     
-    -- Check if actually in air (optional safety)
     local groundPos = findGroundPosition()
     if not groundPos then 
         print("[Panic Ground] No ground found!")
@@ -176,7 +168,6 @@ local function executePanicGround()
     local mode = Surge['Panic Ground']['Mode'] or 'Instant'
     
     if mode == 'Instant' then
-        -- Instant teleport
         local oldVelocity = hrp.AssemblyLinearVelocity
         hrp.CFrame = CFrame.new(groundPos)
         
@@ -189,7 +180,6 @@ local function executePanicGround()
         print("[Panic Ground] Teleported to ground!")
         
     elseif mode == 'Smooth' then
-        -- Smooth descent (less detectable)
         local speed = Surge['Panic Ground']['Smooth Speed'] or 200
         local connection
         connection = RunService.RenderStepped:Connect(function(dt)
@@ -216,216 +206,113 @@ local function executePanicGround()
 end
 
 -- ==========================================================
---  AUTO STOMP SYSTEM
+--  ANTI TRIP SYSTEM
 -- ==========================================================
-local function getKnockedPlayers()
-    local knocked = {}
-    for _, p in pairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
-        local char = p.Character
-        if not char then continue end
-        
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health <= 0 then
-            table.insert(knocked, p)
-        end
-    end
-    return knocked
-end
-
-local function autoStomp()
-    if not AutoStompActive then return end
-    if not Surge['Auto Stomp']['Enabled'] then return end
+local function applyAntiTrip()
+    if not Surge['Anti Trip']['Enabled'] then return end
     
     local char = LocalPlayer.Character
     if not char then return end
     
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local range = Surge['Auto Stomp']['Range'] or 8
-    local now = tick()
-    
-    -- Cooldown check
-    if now - LastStompTime < 0.3 then return end
-    
-    local knockedPlayers = getKnockedPlayers()
-    
-    for _, target in pairs(knockedPlayers) do
-        local tChar = target.Character
-        if not tChar then continue end
-        
-        local tHrp = tChar:FindFirstChild("HumanoidRootPart")
-        if not tHrp then continue end
-        
-        local dist = (hrp.Position - tHrp.Position).Magnitude
-        
-        if dist <= range then
-            -- Auto equip bat if enabled
-            if Surge['Auto Stomp']['Auto Equip Bat'] then
-                local bat = char:FindFirstChild("[Bat]") or LocalPlayer.Backpack:FindFirstChild("[Bat]")
-                if bat then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        hum:EquipTool(bat)
-                    end
-                end
-            end
-            
-            -- Perform stomp (Da Hood specific)
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then
-                pcall(function()
-                    tool:Activate()
-                end)
-                LastStompTime = now
-                print("[Auto Stomp] Stomped:", target.Name)
-                break -- Only stomp one at a time
-            end
-        end
-    end
-end
-
--- ==========================================================
---  ANTI GRAB SYSTEM
--- ==========================================================
-local function checkAndBreakGrab()
-    if not AntiGrabActive then return end
-    if not Surge['Anti Grab']['Enabled'] then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    -- Check if being grabbed (Da Hood specific constraints)
-    local grabbed = false
-    
-    for _, v in pairs(char:GetDescendants()) do
-        if v:IsA("BodyGyro") or v:IsA("BodyPosition") then
-            if v.Name:match("GRAB") or v.Name:match("Grab") then
-                grabbed = true
-                break
-            end
-        end
-    end
-    
-    -- Alternative check: PlatformStand or specific constraints
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and hum.PlatformStand then
-        grabbed = true
-    end
-    
-    if grabbed then
-        if Surge['Anti Grab']['Instant Break'] then
-            -- Method 1: Destroy constraints
-            for _, v in pairs(char:GetDescendants()) do
-                if v:IsA("BodyGyro") or v:IsA("BodyPosition") or v:IsA("RocketPropulsion") then
-                    v:Destroy()
-                end
-            end
-            
-            -- Method 2: Reset humanoid state
-            if hum then
-                hum.PlatformStand = false
-                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-                hum:ChangeState(Enum.HumanoidStateType.Running)
-            end
-            
-            -- Method 3: Teleport slightly to break weld
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                hrp.CFrame = hrp.CFrame + Vector3.new(0, 0.5, 0)
-            end
-            
-            print("[Anti Grab] Broke free from grab!")
-        end
-    end
-    
-    -- Anti Slow: Remove walk speed reductions
-    if Surge['Anti Grab']['Anti Slow'] and hum then
-        if hum.WalkSpeed < 16 then -- Default is 16
-            hum.WalkSpeed = 16
-        end
-    end
-end
-
--- ==========================================================
---  AUTO BLOCK SYSTEM
--- ==========================================================
-local function isBeingAimedAt()
-    local myChar = LocalPlayer.Character
-    if not myChar then return false end
-    
-    local myHrp = myChar:FindFirstChild("HumanoidRootPart")
-    if not myHrp then return false end
-    
-    for _, p in pairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
-        
-        local char = p.Character
-        if not char then continue end
-        
-        -- Check if they have a melee tool equipped
-        local tool = char:FindFirstChildOfClass("Tool")
-        if not tool then continue end
-        
-        -- Check if it's a melee weapon (bat, knife, etc.)
-        local toolName = tool.Name:lower()
-        if not (toolName:match("bat") or toolName:match("knife") or toolName:match("fist")) then
-            continue
-        end
-        
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
-        
-        -- Check if facing towards us
-        local toPlayer = (myHrp.Position - hrp.Position).Unit
-        local lookDir = hrp.CFrame.LookVector
-        local dot = toPlayer:Dot(lookDir)
-        
-        -- If they're facing us (dot > 0.7 = ~45 degrees) and close
-        if dot > 0.7 then
-            local dist = (myHrp.Position - hrp.Position).Magnitude
-            if dist <= 10 then -- Melee range
-                return true
-            end
-        end
-    end
-    
-    return false
-end
-
-local function autoBlock()
-    if not AutoBlockActive then return end
-    if not Surge['Auto Block']['Enabled'] then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local now = tick()
-    local reactionTime = Surge['Auto Block']['Reaction Time'] or 0.05
-    
-    -- Only block when being aimed at (optional)
-    if Surge['Auto Block']['Only When Aimed At'] and not isBeingAimedAt() then
-        return
-    end
-    
-    if now - LastBlockTime < reactionTime then return end
-    
-    -- Da Hood blocking: Hold F to block/parry
-    -- We simulate this by activating a tool or using keypress
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
     
-    -- Method: Equip fists and block
-    local fists = char:FindFirstChild("Fists") or LocalPlayer.Backpack:FindFirstChild("Fists")
-    if fists then
-        hum:EquipTool(fists)
-        task.wait(0.05)
-        pcall(function()
-            fists:Activate() -- Block
-        end)
-        LastBlockTime = now
+    -- Prevent tripping by keeping AutoRotate true and resetting state
+    hum.AutoRotate = true
+    
+    -- Check for trip/fall states and immediately recover
+    if hum:GetState() == Enum.HumanoidStateType.FallingDown or 
+       hum:GetState() == Enum.HumanoidStateType.Ragdoll or
+       hum.PlatformStand then
+        
+        hum.PlatformStand = false
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+        
+        -- Reset velocity if falling/tripping
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrp.AssemblyLinearVelocity = Vector3.new(
+                hrp.AssemblyLinearVelocity.X * 0.5,
+                0,
+                hrp.AssemblyLinearVelocity.Z * 0.5
+            )
+        end
     end
+end
+
+-- ==========================================================
+--  HEADLESS & KORBLOX SYSTEM
+-- ==========================================================
+local function applyHeadless()
+    if not Surge['Extra']['Headless'] then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+    
+    -- Make head invisible and small (classic headless look)
+    head.Transparency = 1
+    head.Size = Vector3.new(1, 0.5, 1)
+    
+    -- Hide face accessories
+    for _, v in pairs(head:GetChildren()) do
+        if v:IsA("Decal") or v:IsA("Texture") then
+            v.Transparency = 1
+        end
+    end
+    
+    -- Hide head accessories
+    for _, v in pairs(char:GetChildren()) do
+        if v:IsA("Accessory") and v:FindFirstChild("Handle") then
+            local handle = v.Handle
+            if handle and handle.Position.Y > char.HumanoidRootPart.Position.Y + 2 then
+                handle.Transparency = 1
+            end
+        end
+    end
+end
+
+local function applyKorblox()
+    if not Surge['Extra']['Korblox'] then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    -- Find right leg
+    local rightLeg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightLowerLeg")
+    if not rightLeg then return end
+    
+    -- Make leg invisible (Korblox skeleton leg look)
+    rightLeg.Transparency = 1
+    
+    -- Hide right leg accessories/shoes
+    for _, v in pairs(char:GetChildren()) do
+        if v:IsA("Accessory") and v:FindFirstChild("Handle") then
+            local handle = v.Handle
+            -- Check if accessory is on right leg (approximate by position)
+            if handle then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local relativePos = handle.Position - hrp.Position
+                    -- Right side and lower body
+                    if relativePos.X > 0.5 and relativePos.Y < 0 then
+                        handle.Transparency = 1
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Alternative: Create fake Korblox mesh if you have the asset
+    -- This would require the actual Korblox mesh ID
+end
+
+local function applyExtraVisuals()
+    applyHeadless()
+    applyKorblox()
 end
 
 -- ==========================================================
@@ -442,7 +329,6 @@ local function getGun()
     return nil
 end
 
--- Rapid fire using RenderStepped for instant response
 RunService.RenderStepped:Connect(function()
     if not RapidFireActive then return end
     if not Surge['Player Modification']['Rapid Fire']['Enabled'] then return end
@@ -467,7 +353,6 @@ end)
 local function getBestTarget()
     local targetType = Surge['Target']['Type'] or "Automatic"
     
-    -- Target Mode: Only use locked target
     if targetType == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             if isVisible(LockedTarget) then
@@ -479,12 +364,10 @@ local function getBestTarget()
         return nil
     end
     
-    -- Automatic Mode: Find best target
     if LockedTarget and not shouldUnlockTarget(LockedTarget) and isVisible(LockedTarget) then
         return LockedTarget
     end
     
-    -- Find new target
     local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     local bestTarget, bestDist = nil, math.huge
     local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 75
@@ -649,7 +532,7 @@ local function UpdateESP()
 end
 
 -- ==========================================================
---  TRIGGERBOT SYSTEM (AUTO - Fixed)
+--  TRIGGERBOT SYSTEM
 -- ==========================================================
 local function performTriggerbot()
     if not TriggerbotActive then return end
@@ -657,13 +540,11 @@ local function performTriggerbot()
     
     local target = nil
     
-    -- If Target mode, only shoot locked target
     if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             target = LockedTarget
         end
     else
-        -- Automatic mode: shoot current target
         target = CurrentTarget
     end
     
@@ -672,7 +553,6 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Check if in crosshair/FOV
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     
@@ -683,12 +563,10 @@ local function performTriggerbot()
     
     if dist > threshold then return end
     
-    -- Cooldown check
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
     if now - LastShot < cooldown then return end
     
-    -- Shoot
     local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
     if tool then
         pcall(function()
@@ -719,7 +597,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
-    -- Lock Target (Z key)
+    -- Lock Target
     local lockKey = getKeyCodeFromString(Keybinds['Lock Target'] or 'Z')
     if lockKey and input.KeyCode == lockKey then
         if LockedTarget then
@@ -755,46 +633,10 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
-    -- NEW: Panic Ground
+    -- Panic Ground
     local panicGroundKey = getKeyCodeFromString(Keybinds['Panic Ground'] or 'X')
     if panicGroundKey and input.KeyCode == panicGroundKey then
         executePanicGround()
-        return
-    end
-    
-    -- NEW: Auto Stomp Toggle
-    local stompKey = getKeyCodeFromString(Keybinds['Auto Stomp'] or 'N')
-    if stompKey and input.KeyCode == stompKey then
-        if not Surge['Auto Stomp']['Enabled'] then return end
-        
-        local mode = Surge['Auto Stomp']['Mode'] or 'Toggle'
-        if mode == 'Toggle' then
-            AutoStompActive = not AutoStompActive
-            print("Auto Stomp:", AutoStompActive and "ON" or "OFF")
-        else
-            AutoStompActive = true
-            print("Auto Stomp: HOLD")
-        end
-        return
-    end
-    
-    -- NEW: Anti Grab Toggle
-    local antiGrabKey = getKeyCodeFromString(Keybinds['Anti Grab'] or 'G')
-    if antiGrabKey and input.KeyCode == antiGrabKey then
-        if not Surge['Anti Grab']['Enabled'] then return end
-        
-        AntiGrabActive = not AntiGrabActive
-        print("Anti Grab:", AntiGrabActive and "ON" or "OFF")
-        return
-    end
-    
-    -- NEW: Auto Block Toggle
-    local blockKey = getKeyCodeFromString(Keybinds['Auto Block'] or 'H')
-    if blockKey and input.KeyCode == blockKey then
-        if not Surge['Auto Block']['Enabled'] then return end
-        
-        AutoBlockActive = not AutoBlockActive
-        print("Auto Block:", AutoBlockActive and "ON" or "OFF")
         return
     end
     
@@ -807,9 +649,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
             CurrentTarget = nil
             TriggerbotActive = false
             RapidFireActive = false
-            AutoStompActive = false
-            AntiGrabActive = false
-            AutoBlockActive = false
             
             for _, drawings in pairs(ESPCache) do
                 for _, dr in pairs(drawings) do dr.Visible = false end
@@ -830,15 +669,6 @@ UserInputService.InputEnded:Connect(function(input, processed)
             print("Triggerbot: OFF")
         end
     end
-    
-    -- Auto Stomp Hold Mode
-    local stompKey = getKeyCodeFromString(Keybinds['Auto Stomp'] or 'N')
-    if stompKey and input.KeyCode == stompKey then
-        if Surge['Auto Stomp']['Enabled'] and Surge['Auto Stomp']['Mode'] == 'Hold' then
-            AutoStompActive = false
-            print("Auto Stomp: OFF")
-        end
-    end
 end)
 
 -- ==========================================================
@@ -854,10 +684,11 @@ RunService.RenderStepped:Connect(function()
     -- Triggerbot
     performTriggerbot()
     
-    -- NEW: Feature Loops
-    autoStomp()
-    checkAndBreakGrab()
-    autoBlock()
+    -- NEW: Anti Trip
+    applyAntiTrip()
+    
+    -- NEW: Extra Visuals (Headless/Korblox)
+    applyExtraVisuals()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -902,7 +733,7 @@ setreadonly(mt, true)
 
 print("Brightside Core Loaded!")
 print("Target Mode:", Surge['Target']['Type'])
-print("New Features: Panic Ground, Auto Stomp, Anti Grab, Auto Block")
+print("Features: Panic Ground, Anti Trip, Headless, Korblox")
 print("Loading external features...")
 
 -- ==========================================================
