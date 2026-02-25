@@ -24,9 +24,6 @@ local ESPCache = {}
 local LockedTarget = nil
 local CurrentTarget = nil
 local ESPEnabled = Surge['Raid Awareness']['Enabled']
-local SilentAimEnabled = Surge['Silent Aimbot']['Enabled']
-local SpeedEnabled = Surge['Player Modification']['Movement']['Speed Modifications']['Enabled']
-local JumpEnabled = Surge['Player Modification']['Movement']['Jump Modifications']['Enabled']
 local TriggerbotActive = false
 local LastShot = 0
 local RapidFireActive = false
@@ -507,28 +504,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
         end
         return
     end
-
-    -- Speed Toggle
-    local speedKey = getKeyCodeFromString(Keybinds['Speed'] or 'B')
-    if speedKey and input.KeyCode == speedKey then
-        SpeedEnabled = not SpeedEnabled
-        print("Speed:", SpeedEnabled and "ON" or "OFF")
-        if not SpeedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-            LocalPlayer.Character.Humanoid.WalkSpeed = 16
-        end
-        return
-    end
-
-    -- Jump Power Toggle
-    local jumpKey = getKeyCodeFromString(Keybinds['Jump Power'] or 'Y')
-    if jumpKey and input.KeyCode == jumpKey then
-        JumpEnabled = not JumpEnabled
-        print("Jump Power:", JumpEnabled and "ON" or "OFF")
-        if not JumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
-            LocalPlayer.Character.Humanoid.JumpPower = 50
-        end
-        return
-    end
     
     -- Triggerbot Activate
     local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
@@ -594,9 +569,6 @@ end)
 --  MAIN LOOP
 -- ==========================================================
 RunService.RenderStepped:Connect(function()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    
     CurrentTarget = getBestTarget()
     UpdateESP()
     performTriggerbot()
@@ -604,21 +576,6 @@ RunService.RenderStepped:Connect(function()
     -- Run Extra Features
     applyExtraVisuals()
     performAntiTrip()
-
-    -- Movement Modifications (NATIVE)
-    if Surge['Player Modification']['Movement']['Enabled'] then
-        if hum then
-            if SpeedEnabled then
-                local val = Surge['Player Modification']['Movement']['Speed Modifications']['Value'] or 1
-                hum.WalkSpeed = 16 * val
-            end
-            if JumpEnabled then
-                local val = Surge['Player Modification']['Movement']['Jump Modifications']['Value'] or 1
-                hum.JumpPower = 50 * val
-                hum.UseJumpPower = true
-            end
-        end
-    end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -642,7 +599,7 @@ setreadonly(mt, false)
 local old = mt.__index
 mt.__index = newcclosure(function(self, key)
     if key:lower() == "hit" or key:lower() == "target" then
-        if SilentAimEnabled then
+        if Surge["Silent Aimbot"]["Enabled"] then
             local tgt = CurrentTarget
             if tgt and tgt.Character then
                 local char = tgt.Character
@@ -678,4 +635,3 @@ task.spawn(function()
         warn("Failed to load external features:", err)
     end
 end)
-
