@@ -2,6 +2,7 @@
 --  BRIGHTSIDE V1 - FINAL SOURCE (INTEGRATED EXTRAS)
 --  Fixed: Rapid Fire, Triggerbot, Target System
 --  Added: Spiderman, Korblox, Headless, Anti Trip, Panic Ground
+--  OPTIMIZED: Silent Aim (Da Hood Special)
 -- ==========================================================
 
 local Players           = game:GetService("Players")
@@ -161,7 +162,7 @@ local function getBestTarget()
     
     local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     local bestTarget, bestDist = nil, math.huge
-    local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 75
+    local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
     
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
@@ -368,7 +369,7 @@ local function performTriggerbot()
 end
 
 -- ==========================================================
---  EXTRA FEATURES BLOCK (NEWLY ADDED)
+--  EXTRA FEATURES BLOCK
 -- ==========================================================
 
 -- // ROBUST WALL DETECTION (Spiderman)
@@ -462,7 +463,7 @@ local function performPanicGround()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
-    local res = Workspace:Raycast(hrp.Position, Vector3.new(0, -500, 0), RaycastParams.new())
+    local res = Workspace:Raycast(hrp.Position, Vector3.new(0, -1000, 0), RaycastParams.new())
     if res then 
         hrp.CFrame = CFrame.new(res.Position + Vector3.new(0, 3, 0)) 
     end
@@ -506,7 +507,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
     
     -- Triggerbot Activate
-    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
+    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
         if not Surge['Triggerbot']['Enabled'] then return end
         local mode = Surge['Triggerbot']['Mode'] or 'Hold'
@@ -556,7 +557,7 @@ end)
 
 UserInputService.InputEnded:Connect(function(input, processed)
     if processed then return end
-    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
+    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
         if Surge['Triggerbot']['Enabled'] and Surge['Triggerbot']['Mode'] == 'Hold' then
             TriggerbotActive = false
@@ -591,88 +592,89 @@ for _, player in pairs(Players:GetPlayers()) do
 end
 
 -- ==========================================================
---  SILENT AIM
+--  OPTIMIZED SILENT AIM (DA HOOD SPECIAL)
 -- ==========================================================
--- ==========================================================
---  SILENT AIM (FIXED - Better Targeting & Prediction)
--- ==========================================================
-local mouse = LocalPlayer:GetMouse()
-local mt = getrawmetatable(mouse)
-setreadonly(mt, false)
-local old = mt.__index
+local gmt = getrawmetatable(game)
+setreadonly(gmt, false)
+local oldIndex = gmt.__index
+local oldNamecall = gmt.__namecall
 
-mt.__index = newcclosure(function(self, key)
-    if key:lower() == "hit" or key:lower() == "target" then
-        if Surge["Silent Aimbot"]["Enabled"] and CurrentTarget then
-            local tgt = CurrentTarget
-            if tgt and tgt.Character then
-                local char = tgt.Character
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                local head = char:FindFirstChild("Head")
-                
-                -- Determine hit part based on config
-                local hitPartStr = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"] or "Closest Point"
-                local targetPart = nil
-                
-                if hitPartStr == "Head" and head then
-                    targetPart = head
-                elseif hitPartStr == "HumanoidRootPart" and hrp then
-                    targetPart = hrp
+local function getSilentTarget()
+    local tgt = CurrentTarget
+    if tgt and tgt.Character then
+        local char = tgt.Character
+        local hitPartName = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"]
+        local part = nil
+        
+        if hitPartName == "Closest Point" then
+            part = char:FindFirstChild("Head") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("HumanoidRootPart")
+        else
+            part = char:FindFirstChild(hitPartName) or char:FindFirstChild("HumanoidRootPart")
+        end
+        
+        if part then
+            local velocity = part.AssemblyLinearVelocity
+            local prediction = Surge["Silent Aimbot"]["Prediction"]
+            local usePower = Surge["Silent Aimbot"]["Prediction"]["Power"]["Enabled"]
+            local power = Surge["Silent Aimbot"]["Prediction"]["Power"]["Prediction Power"] or 1.0
+            
+            local offset = Vector3.new(velocity.X * prediction.X, velocity.Y * prediction.Y, velocity.Z * prediction.Z)
+            if usePower then
+                offset = offset * power
+            end
+            
+            return part, part.Position + offset
+        end
+    end
+    return nil
+end
+
+gmt.__index = newcclosure(function(self, key)
+    if not checkcaller() and Surge["Silent Aimbot"]["Enabled"] then
+        if self == Mouse and (key == "Hit" or key == "Target") then
+            local part, pos = getSilentTarget()
+            if part then
+                return key == "Hit" and CFrame.new(pos) or part
+            end
+        end
+    end
+    return oldIndex(self, key)
+end)
+
+gmt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+    
+    if not checkcaller() and Surge["Silent Aimbot"]["Enabled"] then
+        if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "Raycast" then
+            local part, pos = getSilentTarget()
+            if part then
+                if method == "Raycast" then
+                    -- args: origin, direction, params
+                    args[2] = (pos - args[1]).Unit * 1000
                 else
-                    -- Closest Point logic
-                    if hrp and head then
-                        local mousePos = Mouse.Hit.Position
-                        local headDist = (head.Position - mousePos).Magnitude
-                        local hrpDist = (hrp.Position - mousePos).Magnitude
-                        targetPart = headDist < hrpDist and head or hrp
-                    else
-                        targetPart = head or hrp
-                    end
-                end
-                
-                if targetPart then
-                    -- Get velocity for prediction
-                    local vel = targetPart.AssemblyLinearVelocity or targetPart.Velocity or Vector3.new(0, 0, 0)
-                    
-                    -- Apply prediction if enabled
-                    local p = Surge["Silent Aimbot"]["Prediction"]
-                    local offset = Vector3.new(
-                        vel.X * (p.X or 0), 
-                        vel.Y * (p.Y or 0), 
-                        vel.Z * (p.Z or 0)
-                    )
-                    
-                    -- Add power prediction if enabled
-                    if Surge["Silent Aimbot"]["Prediction"]["Power"]["Enabled"] then
-                        local power = Surge["Silent Aimbot"]["Prediction"]["Power"]["Prediction Power"] or 1.042
-                        offset = offset * power
-                    end
-                    
-                    local finalPos = targetPart.Position + offset
-                    
-                    -- Return appropriate value based on key
-                    if key:lower() == "hit" then
-                        return CFrame.new(finalPos)
-                    else
-                        return targetPart
-                    end
+                    -- args: ray, ignoreList/whitelist
+                    local origin = args[1].Origin
+                    args[1] = Ray.new(origin, (pos - origin).Unit * 1000)
                 end
             end
         end
     end
-    return old(self, key)
+    
+    return oldNamecall(self, unpack(args))
 end)
 
-setreadonly(mt, true)
+setreadonly(gmt, true)
 
 print("Brightside Integrated Source Loaded!")
+print("[Brightside] ✅ Optimized Silent Aim Loaded (Da Hood Mode)")
 
 -- ==========================================================
 --  LOAD EXTERNAL SCRIPT (Speed, Aim Assist, etc)
 -- ==========================================================
 task.spawn(function()
     local success, err = pcall(function()
-        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D")
+        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D  ")
         if externalScript and #externalScript > 0 then
             loadstring(externalScript)()
             print("External features loaded successfully")
@@ -680,5 +682,6 @@ task.spawn(function()
     end)
     if not success then
         warn("Failed to load external features:", err)
-    end
+    end     
 end)
+
