@@ -593,31 +593,77 @@ end
 -- ==========================================================
 --  SILENT AIM
 -- ==========================================================
+-- ==========================================================
+--  SILENT AIM (FIXED - Better Targeting & Prediction)
+-- ==========================================================
 local mouse = LocalPlayer:GetMouse()
 local mt = getrawmetatable(mouse)
 setreadonly(mt, false)
 local old = mt.__index
+
 mt.__index = newcclosure(function(self, key)
     if key:lower() == "hit" or key:lower() == "target" then
-        if Surge["Silent Aimbot"]["Enabled"] then
+        if Surge["Silent Aimbot"]["Enabled"] and CurrentTarget then
             local tgt = CurrentTarget
             if tgt and tgt.Character then
                 local char = tgt.Character
-                local bone = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"] or "HumanoidRootPart"
-                local part = char:FindFirstChild(bone) or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
-                if part then
-                    local vel = part.AssemblyLinearVelocity or Vector3.new(0,0,0)
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                local head = char:FindFirstChild("Head")
+                
+                -- Determine hit part based on config
+                local hitPartStr = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"] or "Closest Point"
+                local targetPart = nil
+                
+                if hitPartStr == "Head" and head then
+                    targetPart = head
+                elseif hitPartStr == "HumanoidRootPart" and hrp then
+                    targetPart = hrp
+                else
+                    -- Closest Point logic
+                    if hrp and head then
+                        local mousePos = Mouse.Hit.Position
+                        local headDist = (head.Position - mousePos).Magnitude
+                        local hrpDist = (hrp.Position - mousePos).Magnitude
+                        targetPart = headDist < hrpDist and head or hrp
+                    else
+                        targetPart = head or hrp
+                    end
+                end
+                
+                if targetPart then
+                    -- Get velocity for prediction
+                    local vel = targetPart.AssemblyLinearVelocity or targetPart.Velocity or Vector3.new(0, 0, 0)
+                    
+                    -- Apply prediction if enabled
                     local p = Surge["Silent Aimbot"]["Prediction"]
-                    local offset = Vector3.new(vel.X*p.X, vel.Y*p.Y, vel.Z*p.Z)
-                    return key:lower()=="hit" and CFrame.new(part.Position + offset) or part
+                    local offset = Vector3.new(
+                        vel.X * (p.X or 0), 
+                        vel.Y * (p.Y or 0), 
+                        vel.Z * (p.Z or 0)
+                    )
+                    
+                    -- Add power prediction if enabled
+                    if Surge["Silent Aimbot"]["Prediction"]["Power"]["Enabled"] then
+                        local power = Surge["Silent Aimbot"]["Prediction"]["Power"]["Prediction Power"] or 1.042
+                        offset = offset * power
+                    end
+                    
+                    local finalPos = targetPart.Position + offset
+                    
+                    -- Return appropriate value based on key
+                    if key:lower() == "hit" then
+                        return CFrame.new(finalPos)
+                    else
+                        return targetPart
+                    end
                 end
             end
         end
     end
     return old(self, key)
 end)
-setreadonly(mt, true)
 
+setreadonly(mt, true)
 print("Brightside Integrated Source Loaded!")
 
 -- ==========================================================
