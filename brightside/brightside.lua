@@ -459,15 +459,15 @@ local function performAntiTrip()
     end
 end
 
--- // PANIC GROUND
+-- // PANIC GROUND (FIXED)
 local function performPanicGround()
-    if not Surge['Panic Ground'].Enabled or not checkSelf() then return end
+    if not Surge['Panic Ground'].Enabled then return end
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
     local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {char, getCamera()}
+    params.FilterDescendantsInstances = {char, Workspace.CurrentCamera}
     params.FilterType = Enum.RaycastFilterType.Blacklist
     
     local res = Workspace:Raycast(hrp.Position, Vector3.new(0, -5000, 0), params)
@@ -689,3 +689,4 @@ task.spawn(function()
         warn("Failed to load external features:", err)
     end
 end)
+
