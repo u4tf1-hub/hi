@@ -35,33 +35,36 @@ local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 -- ==========================================================
 --  RAPID FIRE SYSTEM (FIXED - Ultra Low Delay)
 -- ==========================================================
-local function getGun()
-    local char = LocalPlayer.Character
-    if not char then return nil end
-    for _, tool in next, char:GetChildren() do
-        if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then 
-            return tool 
-        end
+local utility = {}
+print("Initializing Setup..")
+getgenv().config = { enable = true, delay = 0.000000000001 }
+utility.get_gun = function()
+    for _, tool in next, game.Players.LocalPlayer.Character:GetChildren() do
+        if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then return tool end
     end
-    return nil
 end
 
--- Rapid fire using RenderStepped for instant response
-RunService.RenderStepped:Connect(function()
-    if not RapidFireActive then return end
-    if not Surge['Player Modification']['Rapid Fire']['Enabled'] then return end
-    
-    local gun = getGun()
-    if not gun then return end
-    
-    local delay = Surge['Player Modification']['Rapid Fire']['Delay'] or 0.000001
-    local now = tick()
-    
-    if now - RapidFireLastFire >= delay then
-        pcall(function()
-            gun:Activate()
-        end)
-        RapidFireLastFire = now
+utility.rapid = function(tool)
+    tool:Activate()
+end
+
+getgenv().is_firing = false
+
+game:GetService("UserInputService").InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        local gun = utility.get_gun()
+        if config.enable and gun and not is_firing then
+            is_firing = true
+            while is_firing do
+                utility.rapid(gun)
+                task.wait(config.delay)
+            end
+        end
+    end
+end)
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        is_firing = false
     end
 end)
 
