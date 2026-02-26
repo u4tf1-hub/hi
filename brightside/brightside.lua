@@ -1,6 +1,6 @@
 -- ==========================================================
 --  BRIGHTSIDE V1 - FINAL SOURCE (INTEGRATED EXTRAS)
---  Fixed: Rapid Fire, Triggerbot, Target System, Checks
+--  Fixed: Rapid Fire, Triggerbot, Target System, Checks, Shooting, ESP
 --  Added: Spiderman, Korblox, Headless, Anti Trip, Panic Ground
 --  OPTIMIZED: Silent Aim (Da Hood Special)
 -- ==========================================================
@@ -10,7 +10,6 @@ local RunService        = game:GetService("RunService")
 local UserInputService  = game:GetService("UserInputService")
 local Workspace         = game:GetService("Workspace")
 local LocalPlayer       = Players.LocalPlayer
-local Camera            = Workspace.CurrentCamera
 local Mouse             = LocalPlayer:GetMouse()
 
 -- ==========================================================
@@ -34,25 +33,27 @@ local RapidFireLastFire = 0
 local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 
 -- ==========================================================
---  UTILITY: CHECK FUNCTIONS (DA HOOD SPECIAL)
+--  UTILITY: PLAYER HELPERS
 -- ==========================================================
+local function isLocalPlayer(player)
+    if not player then return false end
+    return player.UserId == LocalPlayer.UserId
+end
+
 local function isKnocked(player)
     if not player or not player.Character then return false end
     local char = player.Character
     local hum = char:FindFirstChildOfClass("Humanoid")
     
-    -- Standard Health Check
+    -- Health check
     if hum and hum.Health <= 0 then return true end
     
-    -- Da Hood specific BodyEffects check
+    -- Da Hood specific BodyEffects check (KO state)
     local bodyEffects = char:FindFirstChild("BodyEffects")
     if bodyEffects then
         local ko = bodyEffects:FindFirstChild("K.O") or bodyEffects:FindFirstChild("KO")
         if ko and ko.Value == true then return true end
     end
-    
-    -- Ragdoll / PlatformStand check
-    if hum and (hum.PlatformStand or char:FindFirstChild("FakeHead")) then return true end
     
     return false
 end
@@ -83,12 +84,19 @@ local function checkSelf()
 end
 
 local function checkTarget(target)
-    if not target then return false end
+    if not target or isLocalPlayer(target) then return false end
     local tc = Surge['Target Checks']
     if tc['Knocked'] and isKnocked(target) then return false end
     if tc['Grabbed'] and isGrabbed(target) then return false end
     if tc['Forcefield'] and hasForcefield(target) then return false end
     return true
+end
+
+-- ==========================================================
+--  UTILITY: DYNAMIC CAMERA
+-- ==========================================================
+local function getCamera()
+    return Workspace.CurrentCamera or Workspace:FindFirstChildOfClass("Camera")
 end
 
 -- ==========================================================
@@ -133,12 +141,14 @@ end
 local function playerFromMouse()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local closest, closestD = nil, math.huge
+    local cam = getCamera()
+    
     for _, p in pairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
+        if isLocalPlayer(p) then continue end
         local char = p.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
-        local pos = Camera:WorldToViewportPoint(hrp.Position)
+        local pos = cam:WorldToViewportPoint(hrp.Position)
         if pos.Z <= 0 then continue end
         local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
         if dist < closestD then
@@ -156,12 +166,13 @@ local function isVisible(target)
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     
-    local origin = Camera.CFrame.Position
+    local cam = getCamera()
+    local origin = cam.CFrame.Position
     local destination = hrp.Position
     local direction = (destination - origin)
     
     local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, cam}
     raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
     
     local result = Workspace:Raycast(origin, direction, raycastParams)
@@ -203,19 +214,20 @@ local function getBestTarget()
         return LockedTarget
     end
     
-    local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local cam = getCamera()
+    local centre = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
     local bestTarget, bestDist = nil, math.huge
     local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
     
     for _, p in pairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
+        if isLocalPlayer(p) then continue end
         if not checkTarget(p) then continue end
         
         local char = p.Character
         local hrp = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
         
-        local vp = Camera:WorldToViewportPoint(hrp.Position)
+        local vp = cam:WorldToViewportPoint(hrp.Position)
         if vp.Z <= 0 then continue end
         
         local dist = (centre - Vector2.new(vp.X, vp.Y)).Magnitude
@@ -266,10 +278,11 @@ local function UpdateESP()
         return
     end
     
+    local cam = getCamera()
     local maxDist = Surge['Raid Awareness']['Max Render Distance'] or 1000
     
     for _, player in pairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
+        if isLocalPlayer(player) then continue end
         
         local char = player.Character
         if not char then RemoveESP(player); continue end
@@ -286,7 +299,7 @@ local function UpdateESP()
         end
         
         local feetPos = hrp.Position - Vector3.new(0,3,0)
-        local screenPos = Camera:WorldToViewportPoint(feetPos)
+        local screenPos = cam:WorldToViewportPoint(feetPos)
         
         if screenPos.Z <= 0 then
             local drawings = ESPCache[player]
@@ -306,7 +319,7 @@ local function UpdateESP()
         
         -- Box
         local headPos = hrp.Position + Vector3.new(0,6,0)
-        local headScreen = Camera:WorldToViewportPoint(headPos)
+        local headScreen = cam:WorldToViewportPoint(headPos)
         if headScreen.Z > 0 then
             local headSp = Vector2.new(headScreen.X, headScreen.Y)
             local h = math.abs(sp.Y - headSp.Y)
@@ -331,7 +344,7 @@ local function UpdateESP()
         
         -- Tracer
         if Surge['Raid Awareness']['Tracer']['Enabled'] then
-            drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y); drawings.Tracer.To = sp; drawings.Tracer.Color = isTarget and targetColor or Surge['Raid Awareness']['Tracer']['Other Color']; drawings.Tracer.Visible = true
+            drawings.Tracer.From = Vector2.new(sp.X, cam.ViewportSize.Y); drawings.Tracer.To = sp; drawings.Tracer.Color = isTarget and targetColor or Surge['Raid Awareness']['Tracer']['Other Color']; drawings.Tracer.Visible = true
         else
             drawings.Tracer.Visible = false
         end
@@ -360,7 +373,8 @@ local function performTriggerbot()
     if not hrp then return end
     
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local pos = Camera:WorldToViewportPoint(hrp.Position)
+    local cam = getCamera()
+    local pos = cam:WorldToViewportPoint(hrp.Position)
     if pos.Z <= 0 then return end
     
     local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
@@ -481,6 +495,7 @@ RunService.RenderStepped:Connect(function()
     UpdateESP()
     performTriggerbot()
     performAntiTrip()
+    
     -- Apply Visuals
     local char = LocalPlayer.Character
     if char then
@@ -557,7 +572,11 @@ gmt.__namecall = newcclosure(function(self, ...)
             local part, pos = getSilentTarget()
             if part then
                 if method == "Raycast" then args[2] = (pos - args[1]).Unit * 1000
-                else local origin = args[1].Origin; args[1] = Ray.new(origin, (pos - origin).Unit * 1000) end
+                else 
+                    local cam = getCamera()
+                    local origin = args[1].Origin
+                    args[1] = Ray.new(origin, (pos - origin).Unit * 1000) 
+                end
             end
         end
     end
@@ -566,7 +585,7 @@ end)
 
 setreadonly(gmt, true)
 print("Brightside Integrated Source Loaded!")
-print("[Brightside] ✅ All Checks & Silent Aim Operational (Da Hood Mode)")
+print("[Brightside] ✅ Silent Aim & ESP Fixed (Da Hood Mode)")
 
 -- External Features (Speed, etc.)
 task.spawn(function()
