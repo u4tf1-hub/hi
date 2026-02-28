@@ -36,7 +36,7 @@ local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 --  RAPID FIRE SYSTEM (FIXED - Ultra Low Delay)
 -- ==========================================================
 local utility = {}
-print("Key Expires In (NIL DAYS")
+print("Welcome")
 getgenv().config = { enable = true, delay = 0.000000000001 }
 utility.get_gun = function()
     for _, tool in next, game.Players.LocalPlayer.Character:GetChildren() do
