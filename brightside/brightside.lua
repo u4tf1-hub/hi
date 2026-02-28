@@ -1,8 +1,8 @@
-
 -- ==========================================================
 --  BRIGHTSIDE V1 - FINAL SOURCE (INTEGRATED EXTRAS)
 --  Fixed: Rapid Fire, Triggerbot (Da Hood + Hood Customs)
 --  Added: Spiderman, Korblox, Headless, Anti Trip, Panic Ground
+--  Fixed: Mouse cursor targeting
 -- ==========================================================
 
 local Players           = game:GetService("Players")
@@ -36,8 +36,8 @@ local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 --  GAME DETECTION
 -- ==========================================================
 local placeId = game.PlaceId
-local isDaHood = (placeId == 2788229376) -- Da Hood
-local isHoodCustoms = (placeId == 4924922222) -- Hood Customs
+local isDaHood = (placeId == 2788229376)
+local isHoodCustoms = (placeId == 4924922222)
 local isDaHoodGame = isDaHood or isHoodCustoms
 
 print("[Brightside] Game detected:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
@@ -50,14 +50,12 @@ local function getEquippedGun()
     if not char then return nil end
     for _, tool in pairs(char:GetChildren()) do
         if tool:IsA("Tool") then
-            -- Check for gun remotes (Da Hood uses RemoteEvent/RemoteFunction)
-            local remote = tool:FindFirstChild("Fire") 
+            local remote = tool:FindFirstChild("Fire")
                 or tool:FindFirstChild("shoot")
                 or tool:FindFirstChild("Shoot")
                 or tool:FindFirstChild("FireBullet")
                 or tool:FindFirstChildWhichIsA("RemoteEvent")
             if remote then return tool, remote end
-            -- Fallback: any tool with Ammo
             if tool:FindFirstChild("Ammo") then return tool, nil end
         end
     end
@@ -69,19 +67,13 @@ local function fireTool()
     if not tool then return end
 
     if isDaHoodGame then
-        -- Da Hood fires via RemoteEvent with mouse hit position
         if remote and remote:IsA("RemoteEvent") then
-            local target = CurrentTarget or LockedTarget
-            local aimPos = Mouse.Hit.Position -- silent aim already hooks this
-            
-            -- Try firing the remote with hit position (Da Hood style)
+            local aimPos = Mouse.Hit.Position
             pcall(function()
                 remote:FireServer(aimPos, Mouse.Target)
             end)
             return
         end
-
-        -- Fallback: simulate mouse clicks at the tool level
         pcall(function()
             local vrs = game:GetService("VirtualInputManager")
             if vrs then
@@ -91,17 +83,14 @@ local function fireTool()
                 return
             end
         end)
-
-        -- Final fallback: tool activate
         pcall(function() tool:Activate() end)
     else
-        -- Generic game: just activate the tool
         pcall(function() tool:Activate() end)
     end
 end
 
 -- ==========================================================
---  RAPID FIRE SYSTEM (Fixed)
+--  RAPID FIRE SYSTEM
 -- ==========================================================
 local utility = {}
 print("Welcome")
@@ -109,15 +98,15 @@ getgenv().config = { enable = true, delay = 0.000000000001 }
 
 utility.get_gun = function()
     for _, tool in next, LocalPlayer.Character:GetChildren() do
-        if tool:IsA("Tool") and (tool:FindFirstChild("Ammo") or tool:FindFirstChildWhichIsA("RemoteEvent")) then 
-            return tool 
+        if tool:IsA("Tool") and (tool:FindFirstChild("Ammo") or tool:FindFirstChildWhichIsA("RemoteEvent")) then
+            return tool
         end
     end
 end
 
 utility.rapid = function(tool)
     if isDaHoodGame then
-        local remote = tool:FindFirstChild("Fire") 
+        local remote = tool:FindFirstChild("Fire")
             or tool:FindFirstChild("shoot")
             or tool:FindFirstChild("Shoot")
             or tool:FindFirstChildWhichIsA("RemoteEvent")
@@ -208,7 +197,7 @@ local function shouldUnlockTarget(target)
 end
 
 -- ==========================================================
---  TARGET SYSTEM
+--  TARGET SYSTEM (FIXED - uses mouse cursor + crosshair)
 -- ==========================================================
 local function getBestTarget()
     local targetType = Surge['Target']['Type'] or "Automatic"
@@ -221,9 +210,14 @@ local function getBestTarget()
     if LockedTarget and not shouldUnlockTarget(LockedTarget) and isVisible(LockedTarget) then
         return LockedTarget
     end
+
+    -- Use BOTH screen center (crosshair) AND mouse cursor, pick closest to either
     local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+
     local bestTarget, bestDist = nil, math.huge
     local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 75
+
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         local char = p.Character
@@ -234,7 +228,13 @@ local function getBestTarget()
         if not hum or hum.Health <= 0 then continue end
         local vp = Camera:WorldToViewportPoint(hrp.Position)
         if vp.Z <= 0 then continue end
-        local dist = (centre - Vector2.new(vp.X, vp.Y)).Magnitude
+        local screenPos = Vector2.new(vp.X, vp.Y)
+
+        -- Check distance from BOTH crosshair and mouse, use whichever is closer
+        local distFromCenter = (centre - screenPos).Magnitude
+        local distFromMouse = (mousePos - screenPos).Magnitude
+        local dist = math.min(distFromCenter, distFromMouse)
+
         if dist < bestDist and dist <= fov then
             if isVisible(p) then bestDist = dist; bestTarget = p end
         end
@@ -345,7 +345,7 @@ local function UpdateESP()
 end
 
 -- ==========================================================
---  TRIGGERBOT SYSTEM (FIXED for Da Hood + Hood Customs)
+--  TRIGGERBOT SYSTEM
 -- ==========================================================
 local function performTriggerbot()
     if not TriggerbotActive then return end
@@ -362,7 +362,6 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- Check if target is within FOV/hitbox range
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     if pos.Z <= 0 then return end
@@ -370,13 +369,11 @@ local function performTriggerbot()
     local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
     if dist > threshold then return end
 
-    -- Cooldown check
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
     if now - LastShot < cooldown then return end
     LastShot = now
 
-    -- Fire using game-aware method
     fireTool()
 end
 
@@ -574,7 +571,7 @@ for _, player in pairs(Players:GetPlayers()) do
 end
 
 -- ==========================================================
---  SILENT AIM (Fixed)
+--  SILENT AIM
 -- ==========================================================
 local mouse = LocalPlayer:GetMouse()
 local mt = getrawmetatable(mouse)
