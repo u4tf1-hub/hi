@@ -1,6 +1,6 @@
 -- ==========================================================
---  BRIGHTSIDE V4 - FINAL SOURCE (ALL BUGS FIXED)
---  Fixed: Fast Triggerbot, Mouse Cursor Targeting, Anti Trip, Toggle Bug
+--  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP)
+--  Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
 --  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
 --  Games: Da Hood (2788229376), Hood Customs (9825515356)
 -- ==========================================================
@@ -32,7 +32,7 @@ local RapidFireLastFire = 0
 
 -- EXTRA STATE
 local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
-local LastToggleTime = 0 -- Prevent toggle spam
+local LastToggleTime = 0
 
 -- ==========================================================
 --  GAME DETECTION
@@ -103,7 +103,7 @@ local function getKeyCodeFromString(keyName)
 end
 
 -- ==========================================================
---  MOUSE CURSOR TARGETING (NEW - Works in all camera modes)
+--  MOUSE CURSOR TARGETING
 -- ==========================================================
 local function getTargetFromCursor()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
@@ -127,7 +127,6 @@ local function getTargetFromCursor()
         
         local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
         
-        -- Use FOV from config or default 150 for cursor
         local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
         
         if dist < closestDist and dist <= fov then
@@ -140,7 +139,6 @@ local function getTargetFromCursor()
 end
 
 local function playerFromMouse()
-    -- Use cursor targeting instead of proximity
     return getTargetFromCursor()
 end
 
@@ -183,19 +181,17 @@ local function shouldUnlockTarget(target)
 end
 
 -- ==========================================================
---  TARGET SYSTEM (FIXED - Mouse cursor based)
+--  TARGET SYSTEM
 -- ==========================================================
 local function getBestTarget()
     local targetType = Surge['Target']['Type'] or "Automatic"
     
-    -- Target Mode: Only use locked target, but unlock if dead
     if targetType == "Target" then
         if LockedTarget then
             if shouldUnlockTarget(LockedTarget) then
                 LockedTarget = nil
                 return nil
             end
-            -- Check if still visible and in FOV
             if isVisible(LockedTarget) then
                 return LockedTarget
             end
@@ -203,9 +199,7 @@ local function getBestTarget()
         return nil
     end
     
-    -- Automatic Mode: Use cursor targeting
     if LockedTarget and not shouldUnlockTarget(LockedTarget) then
-        -- Check if locked target is still valid via cursor
         local char = LockedTarget.Character
         if char then
             local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -224,7 +218,6 @@ local function getBestTarget()
         LockedTarget = nil
     end
     
-    -- Find new target via cursor
     local cursorTarget = getTargetFromCursor()
     if cursorTarget and isVisible(cursorTarget) then
         return cursorTarget
@@ -311,7 +304,6 @@ local function UpdateESP()
         local boxCol = isTarget and targetColor or Surge['Raid Awareness']['Box']['Other Color']
         local nameCol = isTarget and targetColor or Surge['Raid Awareness']['Name']['Other Color']
         
-        -- Box
         local headPos = hrp.Position + Vector3.new(0,6,0)
         local headScreen = Camera:WorldToViewportPoint(headPos)
         if headScreen.Z > 0 then
@@ -333,7 +325,6 @@ local function UpdateESP()
             end
         end
         
-        -- Name
         if Surge['Raid Awareness']['Name']['Enabled'] then
             local t = Surge['Raid Awareness']['Name']['Type'] or 'Display'
             drawings.Name.Text = t == 'Display' and player.DisplayName or player.Name
@@ -344,7 +335,6 @@ local function UpdateESP()
             drawings.Name.Visible = false
         end
         
-        -- Tracer
         if Surge['Raid Awareness']['Tracer']['Enabled'] then
             drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
             drawings.Tracer.To = sp
@@ -354,7 +344,6 @@ local function UpdateESP()
             drawings.Tracer.Visible = false
         end
         
-        -- Distance
         if Surge['Raid Awareness']['Distance']['Enabled'] and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
             local d = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
             drawings.Distance.Text = math.floor(d) .. " studs"
@@ -368,7 +357,7 @@ local function UpdateESP()
 end
 
 -- ==========================================================
---  TRIGGERBOT SYSTEM (FAST - No delays)
+--  TRIGGERBOT SYSTEM (FAST)
 -- ==========================================================
 local function performTriggerbot()
     if not TriggerbotActive then return end
@@ -376,13 +365,11 @@ local function performTriggerbot()
     
     local target = nil
     
-    -- If Target mode, only shoot locked target
     if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             target = LockedTarget
         end
     else
-        -- Automatic mode: shoot current target (cursor based)
         target = CurrentTarget
     end
     
@@ -391,7 +378,6 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Check if in cursor FOV (more lenient for triggerbot)
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     
@@ -402,12 +388,10 @@ local function performTriggerbot()
     
     if dist > threshold then return end
     
-    -- MINIMAL Cooldown - 0.001 for speed
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
     if now - LastShot < cooldown then return end
     
-    -- Shoot immediately
     local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
     if tool then
         pcall(function()
@@ -418,15 +402,16 @@ local function performTriggerbot()
 end
 
 -- ==========================================================
---  ANTI TRIP SYSTEM (DA HOOD SPECIFIC - ROBUST)
+--  ANTI TRIP SYSTEM (SAFE - UNDETECTED)
 -- ==========================================================
 local lastAntiTripTime = 0
+local antiTripAttempts = 0
 
 local function performAntiTrip()
     if not Surge['Anti Trip']['Enabled'] then return end
     
     local now = tick()
-    if now - lastAntiTripTime < 0.05 then return end -- Run every 0.05s max
+    if now - lastAntiTripTime < 0.1 then return end -- 0.1s interval (slower = safer)
     lastAntiTripTime = now
     
     local char = LocalPlayer.Character
@@ -436,84 +421,31 @@ local function performAntiTrip()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then return end
     
-    -- Da Hood specific checks
-    local isTripped = false
+    -- Only check if actually tripped (PlatformStand is main indicator)
+    if not hum.PlatformStand then return end
     
-    -- Check 1: PlatformStand (main trip indicator)
-    if hum.PlatformStand then
-        isTripped = true
+    -- Limit attempts to prevent detection
+    antiTripAttempts = antiTripAttempts + 1
+    if antiTripAttempts > 5 then
+        -- Too many attempts, probably being forced by server
+        return
     end
     
-    -- Check 2: Ragdoll state
-    if hum:GetState() == Enum.HumanoidStateType.Ragdoll or 
-       hum:GetState() == Enum.HumanoidStateType.FallingDown then
-        isTripped = true
-    end
+    -- SAFE: Just disable PlatformStand (no BodyGyro, no rapid state changes)
+    hum.PlatformStand = false
     
-    -- Check 3: Da Hood specific values
-    if char:FindFirstChild("Ragdolled") then
-        local ragdolled = char:FindFirstChild("Ragdolled")
-        if ragdolled:IsA("BoolValue") and ragdolled.Value == true then
-            isTripped = true
-        end
-        if ragdolled:IsA("StringValue") and ragdolled.Value ~= "" then
-            isTripped = true
-        end
-    end
-    
-    -- Check 4: Velocity anomaly (falling fast while not jumping)
+    -- Optional: subtle velocity cap (not instant stop)
     local vel = hrp.AssemblyLinearVelocity
-    if vel.Y < -50 and hum:GetState() ~= Enum.HumanoidStateType.Jumping then
-        -- Might be ragdolled fall
-        if hum.MoveDirection.Magnitude < 0.1 then
-            isTripped = true
-        end
+    if vel.Magnitude > 50 then
+        hrp.AssemblyLinearVelocity = vel.Unit * 50
     end
     
-    -- Check 5: Animation check (Da Hood uses specific animations)
-    local animator = hum:FindFirstChildOfClass("Animator")
-    if animator then
-        for _, track in pairs(animator:GetPlayingAnimationTracks()) do
-            local animName = track.Name:lower()
-            if animName:find("ragdoll") or animName:find("fall") or animName:find("trip") then
-                if track.IsPlaying and track.Weight > 0.5 then
-                    isTripped = true
-                    break
-                end
-            end
+    -- Reset attempts after 2 seconds of being stable
+    task.delay(2, function()
+        if hum and not hum.PlatformStand then
+            antiTripAttempts = 0
         end
-    end
-    
-    if isTripped then
-        -- Force un-ragdoll
-        hum.PlatformStand = false
-        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-        hum:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
-        hum:ChangeState(Enum.HumanoidStateType.Running)
-        
-        -- Reset velocity
-        hrp.AssemblyLinearVelocity = Vector3.new(vel.X * 0.5, math.max(vel.Y, -10), vel.Z * 0.5)
-        hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-        
-        -- Stabilize with BodyGyro
-        local gyro = hrp:FindFirstChild("AntiTripGyro")
-        if not gyro then
-            gyro = Instance.new("BodyGyro")
-            gyro.Name = "AntiTripGyro"
-            gyro.MaxTorque = Vector3.new(5000, 5000, 5000)
-            gyro.P = 10000
-            gyro.D = 100
-            gyro.CFrame = hrp.CFrame
-            gyro.Parent = hrp
-        end
-        
-        -- Remove gyro after stabilization
-        task.delay(0.15, function()
-            if gyro and gyro.Parent then
-                gyro:Destroy()
-            end
-        end)
-    end
+    end)
 end
 
 -- ==========================================================
@@ -681,7 +613,7 @@ local function performPanicGround()
 end
 
 -- ==========================================================
---  KEYBIND HANDLER (FIXED - Toggle debounce)
+--  KEYBIND HANDLER
 -- ==========================================================
 local Keybinds = Surge['Main']['Keybinds']
 
@@ -703,14 +635,13 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
-    -- Lock Target (Z key) - Uses cursor targeting now
+    -- Lock Target
     local lockKey = getKeyCodeFromString(Keybinds['Lock Target'] or 'Z')
     if lockKey and input.KeyCode == lockKey then
         if LockedTarget then
             LockedTarget = nil
             print("Lock cleared")
         else
-            -- Use cursor targeting for lock
             local cursorTarget = getTargetFromCursor()
             if cursorTarget then
                 LockedTarget = cursorTarget
@@ -720,12 +651,11 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
-    -- Triggerbot Activate (FIXED - Debounced toggle)
+    -- Triggerbot Activate
     local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
         if not Surge['Triggerbot']['Enabled'] then return end
         
-        -- Debounce: prevent toggling faster than 0.3s
         if now - LastToggleTime < 0.3 then return end
         LastToggleTime = now
         
@@ -789,7 +719,6 @@ end)
 UserInputService.InputEnded:Connect(function(input, processed)
     if processed then return end
     
-    -- Triggerbot Hold Mode Release
     local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
         if Surge['Triggerbot']['Enabled'] and Surge['Triggerbot']['Mode'] == 'Hold' then
@@ -804,18 +733,15 @@ end)
 --  MAIN LOOP
 -- ==========================================================
 RunService.RenderStepped:Connect(function()
-    -- Core features
     CurrentTarget = getBestTarget()
     UpdateESP()
     performTriggerbot()
     
-    -- Extra features
     applyHeadless()
     applyKorblox()
     performAntiTrip()
 end)
 
--- Cleanup
 Players.PlayerRemoving:Connect(function(player)
     if player == LockedTarget then LockedTarget = nil end
     if player == CurrentTarget then CurrentTarget = nil end
@@ -829,7 +755,7 @@ for _, player in pairs(Players:GetPlayers()) do
 end
 
 -- ==========================================================
---  SILENT AIM (FIXED - Uses cursor targeting)
+--  SILENT AIM
 -- ==========================================================
 local mouse = LocalPlayer:GetMouse()
 local mt = getrawmetatable(mouse)
@@ -853,7 +779,6 @@ mt.__index = newcclosure(function(self, key)
                 elseif hitPartStr == "HumanoidRootPart" and hrp then
                     targetPart = hrp
                 else
-                    -- Closest Point to cursor
                     if hrp and head then
                         local mousePos = Mouse.Hit.Position
                         local headDist = (head.Position - mousePos).Magnitude
@@ -890,7 +815,7 @@ setreadonly(mt, true)
 
 print("Brightside V4 Loaded Successfully!")
 print("Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
-print("Features: Fast Triggerbot, Cursor Targeting, Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
+print("Features: Fast Triggerbot, Cursor Targeting, Safe Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
 
 -- ==========================================================
 --  LOAD EXTERNAL SCRIPT
