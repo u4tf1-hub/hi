@@ -9,6 +9,7 @@ local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local UserInputService  = game:GetService("UserInputService")
 local Workspace         = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 local Mouse             = LocalPlayer:GetMouse()
@@ -37,52 +38,57 @@ local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 -- ==========================================================
 local placeId = game.PlaceId
 local isDaHood = (placeId == 2788229376)
-local isHoodCustoms = (placeId == 4924922222)
+local isHoodCustoms = (placeId == 9825515356)
 local isDaHoodGame = isDaHood or isHoodCustoms
 
 print("[Brightside] Game detected:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
 
 -- ==========================================================
---  TRIGGERBOT FIRE FUNCTION (Da Hood Compatible)
+--  DA HOOD FIRE FUNCTION (Uses correct remote)
 -- ==========================================================
-local function getEquippedGun()
+local function getEquippedTool()
     local char = LocalPlayer.Character
     if not char then return nil end
     for _, tool in pairs(char:GetChildren()) do
         if tool:IsA("Tool") then
-            local remote = tool:FindFirstChild("Fire")
-                or tool:FindFirstChild("shoot")
-                or tool:FindFirstChild("Shoot")
-                or tool:FindFirstChild("FireBullet")
-                or tool:FindFirstChildWhichIsA("RemoteEvent")
-            if remote then return tool, remote end
-            if tool:FindFirstChild("Ammo") then return tool, nil end
+            return tool
         end
     end
-    return nil, nil
+    return nil
 end
 
-local function fireTool()
-    local tool, remote = getEquippedGun()
-    if not tool then return end
+local function isGun(tool)
+    if not tool then return false end
+    if tool:FindFirstChild("Ammo") then return true end
+    if tool:FindFirstChild("Fire") then return true end
+    if tool:FindFirstChild("shoot") then return true end
+    if tool:FindFirstChild("Shoot") then return true end
+    if tool:FindFirstChild("FireBullet") then return true end
+    if tool:FindFirstChildWhichIsA("RemoteEvent") then return true end
+    return false
+end
+
+local function fireGun()
+    local tool = getEquippedTool()
+    if not tool or not isGun(tool) then return end
 
     if isDaHoodGame then
+        -- Da Hood specific firing
+        local remote = tool:FindFirstChild("Fire") 
+            or tool:FindFirstChild("shoot") 
+            or tool:FindFirstChild("Shoot")
+            or tool:FindFirstChild("FireBullet")
+        
         if remote and remote:IsA("RemoteEvent") then
-            local aimPos = Mouse.Hit.Position
+            local targetPos = Mouse.Hit.Position
+            local targetPart = Mouse.Target
             pcall(function()
-                remote:FireServer(aimPos, Mouse.Target)
+                remote:FireServer(targetPos, targetPart)
             end)
             return
         end
-        pcall(function()
-            local vrs = game:GetService("VirtualInputManager")
-            if vrs then
-                vrs:SendMouseButtonEvent(Mouse.X, Mouse.Y, 0, true, game, 0)
-                task.wait(0.01)
-                vrs:SendMouseButtonEvent(Mouse.X, Mouse.Y, 0, false, game, 0)
-                return
-            end
-        end)
+        
+        -- Fallback to activate
         pcall(function() tool:Activate() end)
     else
         pcall(function() tool:Activate() end)
@@ -90,26 +96,29 @@ local function fireTool()
 end
 
 -- ==========================================================
---  RAPID FIRE SYSTEM
+--  RAPID FIRE SYSTEM (No Delay)
 -- ==========================================================
 local utility = {}
 print("Welcome")
 getgenv().config = { enable = true, delay = 0.000000000001 }
 
 utility.get_gun = function()
-    for _, tool in next, LocalPlayer.Character:GetChildren() do
-        if tool:IsA("Tool") and (tool:FindFirstChild("Ammo") or tool:FindFirstChildWhichIsA("RemoteEvent")) then
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, tool in next, char:GetChildren() do
+        if tool:IsA("Tool") and isGun(tool) then
             return tool
         end
     end
 end
 
 utility.rapid = function(tool)
+    if not tool then return end
     if isDaHoodGame then
-        local remote = tool:FindFirstChild("Fire")
-            or tool:FindFirstChild("shoot")
+        local remote = tool:FindFirstChild("Fire") 
+            or tool:FindFirstChild("shoot") 
             or tool:FindFirstChild("Shoot")
-            or tool:FindFirstChildWhichIsA("RemoteEvent")
+            or tool:FindFirstChild("FireBullet")
         if remote and remote:IsA("RemoteEvent") then
             pcall(function()
                 remote:FireServer(Mouse.Hit.Position, Mouse.Target)
@@ -197,26 +206,30 @@ local function shouldUnlockTarget(target)
 end
 
 -- ==========================================================
---  TARGET SYSTEM (FIXED - uses mouse cursor + crosshair)
+--  TARGET SYSTEM (FIXED - Prioritizes mouse cursor)
 -- ==========================================================
 local function getBestTarget()
     local targetType = Surge['Target']['Type'] or "Automatic"
+    
+    -- Handle locked target mode
     if targetType == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             if isVisible(LockedTarget) then return LockedTarget end
-        else LockedTarget = nil end
+        else 
+            LockedTarget = nil 
+        end
         return nil
     end
+    
+    -- Keep locked target if valid
     if LockedTarget and not shouldUnlockTarget(LockedTarget) and isVisible(LockedTarget) then
         return LockedTarget
     end
 
-    -- Use BOTH screen center (crosshair) AND mouse cursor, pick closest to either
-    local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-
-    local bestTarget, bestDist = nil, math.huge
+    local centre = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 75
+    local bestTarget, bestDist = nil, math.huge
 
     for _, p in pairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
@@ -226,19 +239,30 @@ local function getBestTarget()
         if not hrp then continue end
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then continue end
+        
         local vp = Camera:WorldToViewportPoint(hrp.Position)
         if vp.Z <= 0 then continue end
+        
         local screenPos = Vector2.new(vp.X, vp.Y)
-
-        -- Check distance from BOTH crosshair and mouse, use whichever is closer
-        local distFromCenter = (centre - screenPos).Magnitude
+        
+        -- Calculate distance from MOUSE CURSOR (priority) and crosshair
         local distFromMouse = (mousePos - screenPos).Magnitude
-        local dist = math.min(distFromCenter, distFromMouse)
-
+        local distFromCenter = (centre - screenPos).Magnitude
+        
+        -- Use mouse distance primarily, but allow crosshair if mouse is far
+        local dist = distFromMouse
+        if distFromCenter < distFromMouse and distFromCenter < fov then
+            dist = distFromCenter
+        end
+        
         if dist < bestDist and dist <= fov then
-            if isVisible(p) then bestDist = dist; bestTarget = p end
+            if isVisible(p) then 
+                bestDist = dist
+                bestTarget = p 
+            end
         end
     end
+    
     return bestTarget
 end
 
@@ -345,7 +369,7 @@ local function UpdateESP()
 end
 
 -- ==========================================================
---  TRIGGERBOT SYSTEM
+--  TRIGGERBOT SYSTEM (FIXED)
 -- ==========================================================
 local function performTriggerbot()
     if not TriggerbotActive then return end
@@ -353,10 +377,13 @@ local function performTriggerbot()
 
     local target = nil
     if Surge['Target']['Type'] == "Target" then
-        if LockedTarget and not shouldUnlockTarget(LockedTarget) then target = LockedTarget end
+        if LockedTarget and not shouldUnlockTarget(LockedTarget) then 
+            target = LockedTarget 
+        end
     else
         target = CurrentTarget
     end
+    
     if not target or not target.Character then return end
 
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
@@ -365,8 +392,10 @@ local function performTriggerbot()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     if pos.Z <= 0 then return end
+    
     local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
     local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
+    
     if dist > threshold then return end
 
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
@@ -374,7 +403,7 @@ local function performTriggerbot()
     if now - LastShot < cooldown then return end
     LastShot = now
 
-    fireTool()
+    fireGun()
 end
 
 -- ==========================================================
@@ -507,8 +536,10 @@ UserInputService.InputBegan:Connect(function(input, processed)
         local mode = Surge['Triggerbot']['Mode'] or 'Hold'
         if mode == 'Toggle' then
             TriggerbotActive = not TriggerbotActive
+            print("Triggerbot:", TriggerbotActive and "ON" or "OFF")
         else
             TriggerbotActive = true
+            print("Triggerbot: HOLD")
         end
         return
     end
@@ -535,6 +566,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
             for _, drawings in pairs(ESPCache) do
                 for _, dr in pairs(drawings) do dr.Visible = false end
             end
+            print("!!! PANIC !!!")
         end
     end
 end)
@@ -545,6 +577,7 @@ UserInputService.InputEnded:Connect(function(input, processed)
     if trigKey and input.KeyCode == trigKey then
         if Surge['Triggerbot']['Enabled'] and Surge['Triggerbot']['Mode'] == 'Hold' then
             TriggerbotActive = false
+            print("Triggerbot: OFF")
         end
     end
 end)
@@ -628,7 +661,7 @@ print("Brightside Integrated Source Loaded!")
 -- ==========================================================
 task.spawn(function()
     local success, err = pcall(function()
-        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D")
+        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D  ")
         if externalScript and #externalScript > 0 then
             loadstring(externalScript)()
             print("External features loaded successfully")
