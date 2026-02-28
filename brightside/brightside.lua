@@ -455,71 +455,36 @@ local function getWallNormal()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
-    
-    local wallDist = Surge.Spiderman['Wall Distance'] or 6
+    local wallDist = Surge.Spiderman['Wall Distance'] or 7
     local params = RaycastParams.new()
     params.FilterDescendantsInstances = {char}
     params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local directions = {
-        hrp.CFrame.LookVector,
-        -hrp.CFrame.LookVector,
-        hrp.CFrame.RightVector,
-        -hrp.CFrame.RightVector
-    }
-    
-    for _, dir in ipairs(directions) do
-        local res = Workspace:Raycast(hrp.Position, dir * wallDist, params)
-        if res and res.Instance and res.Instance.CanCollide then
-            return res.Normal
+    local heights = {Vector3.new(0, -2, 0), Vector3.new(0, 0, 0), Vector3.new(0, 2, 0)}
+    local dirs = {hrp.CFrame.LookVector, -hrp.CFrame.LookVector, hrp.CFrame.RightVector, -hrp.CFrame.RightVector}
+    for _, h in ipairs(heights) do
+        for _, d in ipairs(dirs) do
+            local res = Workspace:Raycast(hrp.Position + h, d * wallDist, params)
+            if res and res.Instance.CanCollide then return res.Normal end
         end
     end
-    
     return nil
-end
-
-local function hasKnifeEquipped()
-    local char = LocalPlayer.Character
-    if not char then return false end
-    
-    local tool = char:FindFirstChildOfClass("Tool")
-    if tool then
-        local toolName = tool.Name:lower()
-        return toolName:find("knife") or toolName:find("blade") or toolName:find("katana")
-    end
-    return false
 end
 
 local function performWallJump()
     if not Surge.Spiderman.Enabled then return end
-    
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then return end
-    
-    local now = tick()
-    if now - LastWallJumpTime < (Surge.Spiderman.Cooldown or 0.2) then return end
-    
-    if hum.FloorMaterial ~= Enum.Material.Air then return end
-    
+    if not hrp or tick() - LastWallJumpTime < (Surge.Spiderman.Cooldown or 0.2) then return end
     local wallNormal = getWallNormal()
     if not wallNormal then return end
-    
-    local isKnife = hasKnifeEquipped()
+    local tool = char:FindFirstChildOfClass("Tool")
+    local isKnife = tool and tool.Name:lower():match("knife")
     local power = isKnife and Surge.Spiderman['Knife Jump Power'] or Surge.Spiderman['Jump Power']
-    
-    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X * 0.3, 0, hrp.AssemblyLinearVelocity.Z * 0.3)
-    
+    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X * 0.2, 0, hrp.AssemblyLinearVelocity.Z * 0.2)
     task.wait(0.01)
-    
-    local jumpDir = (Vector3.new(0, 1, 0) + wallNormal * 0.4).Unit
-    hrp.AssemblyLinearVelocity = jumpDir * power
-    
-    LastWallJumpTime = now
-    JumpCount = 0
-    
-    print("[Spiderman] Wall jump!", isKnife and "(Knife)" or "", "Power:", power)
+    local jumpDirection = (Vector3.new(0, 1.45, 0) + wallNormal * 0.35).Unit
+    hrp.AssemblyLinearVelocity = jumpDirection * (power * 1.35)
+    LastWallJumpTime = tick()
 end
 
 -- ==========================================================
