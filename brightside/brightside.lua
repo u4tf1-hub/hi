@@ -409,7 +409,6 @@ local function performTriggerbot()
         end)
     end
 end
-
 -- ==========================================================
 --  ANTI TRIP SYSTEM (SAFE - UNDETECTED)
 -- ==========================================================
