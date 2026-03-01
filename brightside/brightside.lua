@@ -1,806 +1,1024 @@
--- ==========================================================
---  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP)
---  Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
---  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
---  Games: Da Hood (2788229376), Hood Customs (9825515356)
--- ==========================================================
+-- ══════════════════════════════════════════════════════════════
+--               BRIGHTSIDE SOURCE v5.0 - DAHOOD
+-- ══════════════════════════════════════════════════════════════
 
-local Players           = game:GetService("Players")
-local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
-local Workspace         = game:GetService("Workspace")
-local LocalPlayer       = Players.LocalPlayer
-local Camera            = Workspace.CurrentCamera
-local Mouse             = LocalPlayer:GetMouse()
+local cfg = getgenv().Surge
+if not cfg then warn("[Brightside] No config found in getgenv().Surge") return end
 
--- ==========================================================
---  CONFIG ACCESS
--- ==========================================================
-local Surge = getgenv().Surge
+-- ── Services ──
+local Players        = game:GetService("Players")
+local UIS            = game:GetService("UserInputService")
+local RunService     = game:GetService("RunService")
+local TweenService   = game:GetService("TweenService")
+local StarterGui     = game:GetService("StarterGui")
+local HttpService    = game:GetService("HttpService")
+local Workspace      = game:GetService("Workspace")
 
--- ==========================================================
---  STATE VARIABLES
--- ==========================================================
-local ESPCache = {}
-local LockedTarget = nil
-local CurrentTarget = nil
-local ESPEnabled = Surge['Raid Awareness']['Enabled']
-local TriggerbotActive = false
-local LastShot = 0
-local RapidFireActive = false
-local RapidFireLastFire = 0
+local lp             = Players.LocalPlayer
+local camera         = Workspace.CurrentCamera
+local mouse          = lp:GetMouse()
 
--- EXTRA STATE
-local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
-local LastToggleTime = 0
+-- ── State ──
+local panicActive       = false
+local originalStates    = {}
+local lockedTarget      = nil
+local tbActive          = false
+local tbToggled         = false
+local saEnabled         = cfg['Silent Aim']['Enabled']
+local clEnabled         = cfg['Camlock']['Enabled']
 
--- ==========================================================
---  GAME DETECTION
--- ==========================================================
-local placeId = game.PlaceId
-local isDaHood = (placeId == 2788229376)
-local isHoodCustoms = (placeId == 9825515356)
-local isDaHoodGame = isDaHood or isHoodCustoms
+-- ══════════════════════════════════════════════════════════════
+--  UTILITY
+-- ══════════════════════════════════════════════════════════════
 
-print("[Brightside] Game detected:", isDaHoodGame and "Da Hood / Hood Customs" or "Other", "| PlaceID:", placeId)
-
--- ==========================================================
---  RAPID FIRE SYSTEM
--- ==========================================================
-local utility = {}
-print("Welcome")
-getgenv().config = { enable = true, delay = 0.000000000001 }
-utility.get_gun = function()
-    for _, tool in next, game.Players.LocalPlayer.Character:GetChildren() do
-        if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then return tool end
-    end
+local function getChar(player)
+    return player and player.Character
 end
 
-utility.rapid = function(tool)
-    tool:Activate()
+local function getRoot(player)
+    local c = getChar(player)
+    return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso"))
 end
 
-getgenv().is_firing = false
+local function getHum(player)
+    local c = getChar(player)
+    return c and c:FindFirstChild("Humanoid")
+end
 
-game:GetService("UserInputService").InputBegan:Connect(function(i)
-    if i.UserInputType == Enum.UserInputType.MouseButton1 then
-        local gun = utility.get_gun()
-        if config.enable and gun and not is_firing then
-            is_firing = true
-            while is_firing do
-                utility.rapid(gun)
-                task.wait(config.delay)
-            end
-        end
-    end
-end)
-game:GetService("UserInputService").InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        is_firing = false
-    end
-end)
+local function worldToScreen(pos)
+    local sp, vis = camera:WorldToScreenPoint(pos)
+    return Vector2.new(sp.X, sp.Y), sp.Z, vis
+end
 
--- ==========================================================
---  UTILITY FUNCTIONS
--- ==========================================================
-local function getKeyCodeFromString(keyName)
-    if not keyName or type(keyName) ~= "string" then return nil end
-    local upperKeyName = keyName:upper()
-    
-    local success, keyCode = pcall(function()
-        return Enum.KeyCode[upperKeyName]
+local function screenCenter()
+    return Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+end
+
+local function getKey(name)
+    local k = cfg['Main']['Keybinds'][name]
+    if not k then return nil end
+    local ok, kc = pcall(function() return Enum.KeyCode[k] end)
+    return ok and kc or nil
+end
+
+local function notify(msg)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title   = "Brightside",
+            Text    = msg,
+            Duration = 3,
+        })
     end)
-    
-    if success and keyCode then return keyCode end
-    
-    if upperKeyName:match("^F%d+$") then
-        local fKeyNum = tonumber(upperKeyName:sub(2))
-        if fKeyNum and fKeyNum >= 1 and fKeyNum <= 12 then
-            success, keyCode = pcall(function()
-                return Enum.KeyCode["F" .. fKeyNum]
-            end)
-            if success and keyCode then return keyCode end
-        end
-    end
-    
-    return nil
 end
 
--- ==========================================================
---  MOUSE CURSOR TARGETING
--- ==========================================================
-local function getTargetFromCursor()
-    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local closestPlayer = nil
-    local closestDist = math.huge
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        
-        local char = player.Character
-        if not char then continue end
-        
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
-        
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hum or hum.Health <= 0 then continue end
-        
-        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-        if not onScreen or screenPos.Z <= 0 then continue end
-        
-        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        
-        local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
-        
-        if dist < closestDist and dist <= fov then
-            closestDist = dist
-            closestPlayer = player
-        end
-    end
-    
-    return closestPlayer, closestDist
+-- ══════════════════════════════════════════════════════════════
+--  DAHOOD CHECKS
+-- ══════════════════════════════════════════════════════════════
+
+local function isKnocked(player)
+    local c = getChar(player)
+    if not c then return true end
+    local hum = c:FindFirstChild("Humanoid")
+    if not hum or hum.Health <= 0 then return true end
+    if hum:GetState() == Enum.HumanoidStateType.Dead then return true end
+    -- DaHood specific
+    local kv = c:FindFirstChild("Knocked") or (hum and hum:FindFirstChild("Knocked"))
+    if kv and kv.Value == true then return true end
+    -- Health-based fallback
+    if hum.Health < 1 then return true end
+    return false
 end
 
-local function playerFromMouse()
-    return getTargetFromCursor()
+local function hasForcefield(player)
+    local c = getChar(player)
+    if not c then return false end
+    return c:FindFirstChildOfClass("ForceField") ~= nil
 end
 
-local function isVisible(target)
-    if not Surge['Target']['Visible Check'] then return true end
-    if not target or not target.Character then return false end
-    
-    local hrp = target.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    
-    local origin = Camera.CFrame.Position
-    local direction = (hrp.Position - origin)
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
-    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local result = Workspace:Raycast(origin, direction, raycastParams)
-    if result then
-        return result.Instance:IsDescendantOf(target.Character)
-    end
+local function isGrabbed(player)
+    local c = getChar(player)
+    if not c then return false end
+    local v = c:FindFirstChild("Grabbed") or c:FindFirstChild("IsGrabbed")
+    return v and v.Value == true
+end
+
+local function isValidTarget(player)
+    if not player or player == lp then return false end
+    local lc = cfg['Lock Conditions']
+    if not getChar(player) then return false end
+    if lc['Skip Knocked Targets'] and isKnocked(player) then return false end
+    if lc['Skip Grabbed Targets'] and isGrabbed(player) then return false end
+    if lc['Forcefield Check'] and hasForcefield(player) then return false end
+    -- Self checks
+    if lc['Skip If Self Knocked'] and isKnocked(lp) then return false end
+    if lc['Skip If Self Grabbed'] and isGrabbed(lp) then return false end
     return true
 end
 
-local function shouldUnlockTarget(target)
-    if not target or not target.Character then return true end
-    local char = target.Character
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    
-    if Surge['Target']['Unlock']['Knocked'] and hum and hum.Health <= 0 then
-        return true
-    end
-    
-    if Surge['Target']['Unlock']['Grabbed'] then
-        if char:FindFirstChild("GRABBING_CONSTRAINT") or 
-           (hum and hum.PlatformStand) then
-            return true
-        end
+local function isSelfValid()
+    local lc = cfg['Lock Conditions']
+    if lc['Skip If Self Knocked'] and isKnocked(lp) then return false end
+    if lc['Skip If Self Grabbed'] and isGrabbed(lp) then return false end
+    return true
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  KNIFE / TOOL CHECK
+-- ══════════════════════════════════════════════════════════════
+
+local function getEquippedTool()
+    local c = getChar(lp)
+    return c and c:FindFirstChildOfClass("Tool")
+end
+
+local function isKnifeEquipped()
+    local kc = cfg['Triggerbot']['Knife Check']
+    if not kc['Enabled'] then return false end
+    local tool = getEquippedTool()
+    if not tool then return false end
+    for _, name in ipairs(kc['Knife Names']) do
+        if tool.Name:lower():find(name:lower()) then return true end
     end
     return false
 end
 
--- ==========================================================
---  TARGET SYSTEM
--- ==========================================================
-local function getBestTarget()
-    local targetType = Surge['Target']['Type'] or "Automatic"
-    
-    if targetType == "Target" then
-        if LockedTarget then
-            if shouldUnlockTarget(LockedTarget) then
-                LockedTarget = nil
-                return nil
-            end
-            if isVisible(LockedTarget) then
-                return LockedTarget
-            end
-        end
-        return nil
+-- ══════════════════════════════════════════════════════════════
+--  FOV HELPER
+-- ══════════════════════════════════════════════════════════════
+
+local function inFOV(screenPos, fovCfg)
+    local center = screenCenter()
+    local dist   = (screenPos - center).Magnitude
+    if fovCfg['Type'] == 'Circle' then
+        return dist <= fovCfg['Circle Value'], dist
+    elseif fovCfg['Type'] == 'Box' then
+        local half = Vector2.new(fovCfg['Box']['X'] / 2, fovCfg['Box']['Y'] / 2)
+        local delta = (screenPos - center):Abs()
+        return delta.X <= half.X and delta.Y <= half.Y, dist
     end
-    
-    if LockedTarget and not shouldUnlockTarget(LockedTarget) then
-        local char = LockedTarget.Character
-        if char then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local screenPos = Camera:WorldToViewportPoint(hrp.Position)
-                if screenPos.Z > 0 then
-                    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
-                    if dist <= fov and isVisible(LockedTarget) then
-                        return LockedTarget
+    return false, dist
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  TARGET SELECTION
+-- ══════════════════════════════════════════════════════════════
+
+local function getClosestTarget(fovCfg, ignoreKnocked)
+    local best, bestDist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == lp then continue end
+        if ignoreKnocked and isKnocked(p) then continue end
+        if not isValidTarget(p) then continue end
+        local root = getRoot(p)
+        if not root then continue end
+        local sp, depth, vis = worldToScreen(root.Position)
+        if not vis or depth < 0 then continue end
+        local inside, dist = inFOV(sp, fovCfg)
+        if inside and dist < bestDist then
+            best = p
+            bestDist = dist
+        end
+    end
+    return best
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  LOCKED TARGET MANAGEMENT
+-- ══════════════════════════════════════════════════════════════
+
+local function watchTarget(player)
+    if not player then return end
+    local c = getChar(player)
+    if not c then return end
+
+    -- Unlock on kill/knock
+    if cfg['Lock Conditions']['Unlock On Kill'] then
+        local hum = c:FindFirstChild("Humanoid")
+        if hum then
+            hum.Died:Once(function()
+                if lockedTarget == player then
+                    lockedTarget = nil
+                end
+            end)
+        end
+        -- DaHood knocked value watch
+        c.ChildAdded:Connect(function(child)
+            if child.Name == "Knocked" then
+                child:GetPropertyChangedSignal("Value"):Connect(function()
+                    if child.Value == true and lockedTarget == player then
+                        lockedTarget = nil
+                    end
+                end)
+            end
+        end)
+        local kv = c:FindFirstChild("Knocked")
+        if kv then
+            kv:GetPropertyChangedSignal("Value"):Connect(function()
+                if kv.Value == true and lockedTarget == player then
+                    lockedTarget = nil
+                end
+            end)
+        end
+    end
+end
+
+local function lockOnTarget(player)
+    lockedTarget = player
+    watchTarget(player)
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  PANIC
+-- ══════════════════════════════════════════════════════════════
+
+local function setPanic(enabled)
+    local pc = cfg['Main']['Panic']
+    if enabled then
+        if pc['Disable Silent Aim']     then originalStates['sa'] = cfg['Silent Aim']['Enabled'];  cfg['Silent Aim']['Enabled']  = false end
+        if pc['Disable Camlock']        then originalStates['cl'] = cfg['Camlock']['Enabled'];     cfg['Camlock']['Enabled']     = false end
+        if pc['Disable Triggerbot']     then originalStates['tb'] = cfg['Triggerbot']['Enabled'];  cfg['Triggerbot']['Enabled']  = false end
+        if pc['Disable Visuals']        then originalStates['ra'] = cfg['Raid Awareness']['Enabled']; cfg['Raid Awareness']['Enabled'] = false end
+        if pc['Disable Player Mods']    then originalStates['pm'] = cfg['Player Modification']['Movement']['Enabled']; cfg['Player Modification']['Movement']['Enabled'] = false end
+        panicActive = true
+        notify("⚠ Panic ON")
+    else
+        if originalStates['sa'] ~= nil  then cfg['Silent Aim']['Enabled']  = originalStates['sa'] end
+        if originalStates['cl'] ~= nil  then cfg['Camlock']['Enabled']     = originalStates['cl'] end
+        if originalStates['tb'] ~= nil  then cfg['Triggerbot']['Enabled']  = originalStates['tb'] end
+        if originalStates['ra'] ~= nil  then cfg['Raid Awareness']['Enabled'] = originalStates['ra'] end
+        if originalStates['pm'] ~= nil  then cfg['Player Modification']['Movement']['Enabled'] = originalStates['pm'] end
+        originalStates = {}
+        panicActive = false
+        notify("✅ Panic OFF")
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  SILENT AIM
+-- ══════════════════════════════════════════════════════════════
+
+local mt = getrawmetatable and getrawmetatable(game)
+local oldIndex = mt and rawget(mt, "__index")
+local oldNewIndex = mt and rawget(mt, "__newindex")
+
+local saTarget = nil
+local saActive = false
+
+local function getSATarget()
+    local sc = cfg['Silent Aim']
+    return getClosestTarget(sc['FOV'], true)
+end
+
+-- Hook mouse hit / target part for silent aim via __index override
+if mt and oldIndex then
+    local ok = pcall(function() setreadonly(mt, false) end)
+    if ok then
+        local oldNamecall = rawget(mt, "__namecall")
+        rawset(mt, "__namecall", newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if cfg['Silent Aim']['Enabled'] and not panicActive and method == "FindPartOnRayWithIgnoreList" then
+                local target = getSATarget()
+                if target then
+                    local c = getChar(target)
+                    if c then
+                        local hitPart = cfg['Silent Aim']['Hit Part']
+                        local part = c:FindFirstChild(hitPart) or c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso")
+                        if part then
+                            local pred = cfg['Silent Aim']['Prediction']
+                            local pos = part.Position + Vector3.new(pred['X'], pred['Y'], pred['Z'])
+                            return part, pos
+                        end
                     end
                 end
             end
+            return oldNamecall(self, ...)
+        end))
+        setreadonly(mt, true)
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  CAMLOCK (AIM ASSIST)
+-- ══════════════════════════════════════════════════════════════
+
+local camlockConnection = nil
+
+local function getCamlockTarget()
+    return getClosestTarget(cfg['Camlock']['FOV'], true)
+end
+
+local function startCamlock()
+    if camlockConnection then camlockConnection:Disconnect() end
+    camlockConnection = RunService.RenderStepped:Connect(function()
+        if not cfg['Camlock']['Enabled'] or panicActive then return end
+        if not isSelfValid() then return end
+
+        local target = lockedTarget
+        if cfg['Target']['Type'] == 'Automatic' then
+            target = getCamlockTarget()
         end
-        LockedTarget = nil
+        if not target or not isValidTarget(target) then return end
+
+        local root = getRoot(target)
+        if not root then return end
+
+        local cl = cfg['Camlock']
+        local pred = cl['Prediction']
+        local aimPos = root.Position + Vector3.new(pred['X'], pred['Y'], pred['Z'])
+
+        local sm = cl['Smoothing']
+        local sx, sy = sm['X'], sm['Y']
+
+        local currentCF = camera.CFrame
+        local targetCF  = CFrame.lookAt(currentCF.Position, aimPos)
+
+        -- Smooth lerp
+        local lerpedCF = currentCF:Lerp(targetCF, sx)
+
+        -- Apply via CFrame manipulation
+        local delta = targetCF - currentCF
+        camera.CFrame = CFrame.new(currentCF.Position) * CFrame.Angles(
+            math.rad(delta.Y * (1 - sy) * 60),
+            math.rad(delta.X * (1 - sx) * 60),
+            0
+        ) * currentCF - currentCF.Position + Vector3.new(currentCF.Position.X, currentCF.Position.Y, currentCF.Position.Z)
+
+        -- Mouse movement approach (more compatible)
+        local sp, depth, vis = worldToScreen(aimPos)
+        if vis and depth > 0 then
+            local center = screenCenter()
+            local diff = sp - center
+            if mousemoverel then
+                mousemoverel(diff.X * sx, diff.Y * sy)
+            end
+        end
+    end)
+end
+
+startCamlock()
+
+-- ══════════════════════════════════════════════════════════════
+--  ANTI CURVE
+-- ══════════════════════════════════════════════════════════════
+
+RunService.RenderStepped:Connect(function()
+    local ac = cfg['Silent Aim']['Anti Curve']
+    if not ac['Enabled'] or not cfg['Silent Aim']['Enabled'] or panicActive then return end
+
+    local target = lockedTarget or (cfg['Target']['Type'] == 'Automatic' and getSATarget())
+    if not target then return end
+    local root = getRoot(target)
+    if not root then return end
+
+    local sp, depth, vis = worldToScreen(root.Position)
+    if not vis then return end
+    local center = screenCenter()
+    local diff = sp - center
+    local angle = math.deg(math.atan2(diff.Y, diff.X))
+
+    if math.abs(angle) > ac['Max Angle'] then
+        local dist = diff.Magnitude
+        if dist < ac['Distance Threshold'] then
+            if mousemoverel then
+                mousemoverel(diff.X * 0.1, diff.Y * 0.1)
+            end
+        end
     end
-    
-    local cursorTarget = getTargetFromCursor()
-    if cursorTarget and isVisible(cursorTarget) then
-        return cursorTarget
+end)
+
+-- ══════════════════════════════════════════════════════════════
+--  TRIGGERBOT
+-- ══════════════════════════════════════════════════════════════
+
+local function getPlayerFromRaycast()
+    local unitRay = camera:ScreenPointToRay(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {lp.Character}
+    local result = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
+    if result and result.Instance then
+        local model = result.Instance:FindFirstAncestorOfClass("Model")
+        if model then
+            return Players:GetPlayerFromCharacter(model)
+        end
     end
-    
     return nil
 end
 
--- ==========================================================
---  ESP FUNCTIONS
--- ==========================================================
-local function CreateESP(player)
-    if ESPCache[player] then return ESPCache[player] end
-    local d = {
-        Name = Drawing.new("Text"),
-        Box  = Drawing.new("Square"),
-        BoxOutline = Drawing.new("Square"),
-        Tracer = Drawing.new("Line"),
-        Distance = Drawing.new("Text")
-    }
-    d.Name.Size = 14; d.Name.Center = true; d.Name.Outline = true
-    d.Box.Thickness = 1; d.Box.Filled = false
-    d.BoxOutline.Thickness = 3; d.BoxOutline.Filled = false; d.BoxOutline.Color = Color3.new(0,0,0)
-    d.Tracer.Thickness = 1
-    d.Distance.Size = 12; d.Distance.Center = true; d.Distance.Outline = true
-    ESPCache[player] = d
-    return d
-end
+local function doTriggerbot()
+    local tc = cfg['Triggerbot']
+    if not tc['Enabled'] or panicActive then return end
+    if isKnifeEquipped() then return end
+    if not isSelfValid() then return end
 
-local function RemoveESP(player)
-    if ESPCache[player] then
-        for _, dr in pairs(ESPCache[player]) do dr:Remove() end
-        ESPCache[player] = nil
+    local target = getPlayerFromRaycast()
+    if not target or not isValidTarget(target) then return end
+
+    local sp, depth, vis = worldToScreen(getRoot(target).Position)
+    if not vis then return end
+    local inside = inFOV(sp, tc['FOV'])
+    if not inside then return end
+
+    local tool = getEquippedTool()
+    if not tool then return end
+
+    -- Don't trigger with knife equipped
+    if isKnifeEquipped() then return end
+
+    local fr = tc['Fire Rate']
+    local delay = fr['Enabled'] and fr['Delay'] or 0.05
+
+    for i = 1, (fr['Burst Count'] or 1) do
+        if mouse1press then mouse1press() end
+        task.wait(delay)
+        if mouse1release then mouse1release() end
+        if i < (fr['Burst Count'] or 1) then task.wait(delay) end
     end
 end
 
-local function UpdateESP()
-    if not ESPEnabled then
-        for _, drawings in pairs(ESPCache) do
-            for _, dr in pairs(drawings) do dr.Visible = false end
+-- Triggerbot loop task reference
+local tbTask = nil
+
+local function startTBLoop()
+    tbTask = task.spawn(function()
+        while tbActive or tbToggled do
+            if not tbActive and not tbToggled then break end
+            doTriggerbot()
+            task.wait(0.001)
+        end
+    end)
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  RAID AWARENESS (ESP)
+-- ══════════════════════════════════════════════════════════════
+
+local espFolder = Instance.new("Folder")
+espFolder.Name = "BrightsideESP"
+espFolder.Parent = Workspace
+
+local espObjects = {}
+
+local function removeESP(player)
+    if espObjects[player] then
+        for _, obj in pairs(espObjects[player]) do
+            pcall(function() obj:Remove() end)
+        end
+        espObjects[player] = nil
+    end
+end
+
+local function createESP(player)
+    if not player or player == lp then return end
+    removeESP(player)
+    espObjects[player] = {}
+    local rc = cfg['Raid Awareness']
+
+    -- Name tag
+    if rc['Name']['Enabled'] then
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "BS_Name_" .. player.Name
+        bb.Size = UDim2.new(0, 100, 0, 30)
+        bb.StudsOffset = Vector3.new(0, 3, 0)
+        bb.AlwaysOnTop = true
+        local tl = Instance.new("TextLabel", bb)
+        tl.Size = UDim2.new(1, 0, 1, 0)
+        tl.BackgroundTransparency = 1
+        tl.TextStrokeTransparency = 0
+        tl.TextSize = rc['Name']['Size']
+        tl.Font = Enum.Font.GothamBold
+        local function updateName()
+            local root = getRoot(player)
+            if root then bb.Adornee = root end
+            local isTarget = lockedTarget == player
+            tl.TextColor3 = isTarget and rc['Name']['Target Color'] or rc['Name']['Other Color']
+            if rc['Name']['Type'] == 'Display' then
+                tl.Text = player.DisplayName
+            else
+                tl.Text = player.Name
+            end
+        end
+        updateName()
+        bb.Parent = Workspace
+        espObjects[player].nameTag = bb
+    end
+
+    -- Box ESP
+    if rc['Box']['Enabled'] then
+        local box = Drawing.new("Square")
+        box.Visible = false
+        box.Thickness = 1
+        box.Filled = false
+        box.Color = rc['Box']['Other Color']
+        espObjects[player].box = box
+    end
+
+    -- Tracer
+    if rc['Tracer']['Enabled'] then
+        local tracer = Drawing.new("Line")
+        tracer.Visible = false
+        tracer.Thickness = rc['Tracer']['Thickness']
+        tracer.Color = rc['Tracer']['Other Color']
+        espObjects[player].tracer = tracer
+    end
+end
+
+local function updateESP()
+    local rc = cfg['Raid Awareness']
+    if not rc['Enabled'] then
+        for _, objs in pairs(espObjects) do
+            for _, obj in pairs(objs) do
+                pcall(function()
+                    if typeof(obj) == "Instance" then obj.Enabled = false
+                    else obj.Visible = false end
+                end)
+            end
         end
         return
     end
-    
-    local maxDist = Surge['Raid Awareness']['Max Render Distance'] or 1000
-    
-    for _, player in pairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        
-        local char = player.Character
-        if not char then RemoveESP(player); continue end
-        
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        
-        if not hrp or not hum or hum.Health <= 0 then 
-            RemoveESP(player); continue 
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == lp then continue end
+        local c = getChar(player)
+        if not c then continue end
+        local root = getRoot(player)
+        if not root then continue end
+
+        local sp, depth, vis = worldToScreen(root.Position)
+        local dist3d = (camera.CFrame.Position - root.Position).Magnitude
+        local tooFar = dist3d > rc['Max Render Distance']
+        local isTarget = lockedTarget == player
+
+        if not espObjects[player] then
+            createESP(player)
         end
-        
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            if (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude > maxDist then 
-                RemoveESP(player); continue 
+
+        local objs = espObjects[player]
+        if not objs then continue end
+
+        local color = isTarget and rc['Name']['Target Color'] or rc['Name']['Other Color']
+
+        -- Update name tag
+        if objs.nameTag then
+            objs.nameTag.Enabled = vis and not tooFar
+            if objs.nameTag:FindFirstChild("TextLabel") then
+                objs.nameTag.TextLabel.TextColor3 = color
             end
         end
-        
-        local feetPos = hrp.Position - Vector3.new(0,3,0)
-        local screenPos = Camera:WorldToViewportPoint(feetPos)
-        
-        if screenPos.Z <= 0 then
-            local drawings = ESPCache[player]
-            if drawings then 
-                for _, dr in pairs(drawings) do dr.Visible = false end 
-            end
-            continue
-        end
-        
-        local drawings = CreateESP(player)
-        if not drawings then continue end
-        
-        local sp = Vector2.new(screenPos.X, screenPos.Y)
-        local isTarget = (player == CurrentTarget)
-        local targetColor = Surge['Target']['Color'] or Color3.fromRGB(0, 255, 0)
-        
-        local boxCol = isTarget and targetColor or Surge['Raid Awareness']['Box']['Other Color']
-        local nameCol = isTarget and targetColor or Surge['Raid Awareness']['Name']['Other Color']
-        
-        local headPos = hrp.Position + Vector3.new(0,6,0)
-        local headScreen = Camera:WorldToViewportPoint(headPos)
-        if headScreen.Z > 0 then
-            local headSp = Vector2.new(headScreen.X, headScreen.Y)
-            local h = math.abs(sp.Y - headSp.Y)
-            local w = h * 0.5
-            local boxPos = Vector2.new(sp.X - w/2, headSp.Y)
-            
-            if Surge['Raid Awareness']['Box']['Enabled'] then
-                drawings.BoxOutline.Size = Vector2.new(w+4, h+4)
-                drawings.BoxOutline.Position = Vector2.new(boxPos.X-2, boxPos.Y-2)
-                drawings.BoxOutline.Visible = true
-                drawings.Box.Size = Vector2.new(w,h)
-                drawings.Box.Position = boxPos
-                drawings.Box.Color = boxCol
-                drawings.Box.Visible = true
+
+        -- Update box
+        if objs.box then
+            if vis and not tooFar then
+                local head = c:FindFirstChild("Head")
+                local hrp  = root
+                if head and hrp then
+                    local topSP  = worldToScreen(head.Position + Vector3.new(0, 1, 0))
+                    local botSP  = worldToScreen(hrp.Position  - Vector3.new(0, 3, 0))
+                    local height = math.abs(topSP.Y - botSP.Y)
+                    local width  = height * 0.5
+                    objs.box.Size      = Vector2.new(width, height)
+                    objs.box.Position  = Vector2.new(sp.X - width / 2, math.min(topSP.Y, botSP.Y))
+                    objs.box.Color     = color
+                    objs.box.Visible   = true
+                end
             else
-                drawings.BoxOutline.Visible = false; drawings.Box.Visible = false
+                objs.box.Visible = false
             end
         end
-        
-        if Surge['Raid Awareness']['Name']['Enabled'] then
-            local t = Surge['Raid Awareness']['Name']['Type'] or 'Display'
-            drawings.Name.Text = t == 'Display' and player.DisplayName or player.Name
-            drawings.Name.Position = Vector2.new(sp.X, sp.Y + 10)
-            drawings.Name.Color = nameCol
-            drawings.Name.Visible = true
-        else
-            drawings.Name.Visible = false
-        end
-        
-        if Surge['Raid Awareness']['Tracer']['Enabled'] then
-            drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
-            drawings.Tracer.To = sp
-            drawings.Tracer.Color = isTarget and targetColor or Surge['Raid Awareness']['Tracer']['Other Color']
-            drawings.Tracer.Visible = true
-        else
-            drawings.Tracer.Visible = false
-        end
-        
-        if Surge['Raid Awareness']['Distance']['Enabled'] and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            local d = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-            drawings.Distance.Text = math.floor(d) .. " studs"
-            drawings.Distance.Position = Vector2.new(sp.X, sp.Y + 25)
-            drawings.Distance.Color = isTarget and targetColor or Surge['Raid Awareness']['Distance']['Other Color']
-            drawings.Distance.Visible = true
-        else
-            drawings.Distance.Visible = false
+
+        -- Update tracer
+        if objs.tracer then
+            if vis and not tooFar then
+                local tc = cfg['Raid Awareness']['Tracer']
+                local fromPos = tc['Type'] == 'Feet' and Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y) or screenCenter()
+                objs.tracer.From    = fromPos
+                objs.tracer.To      = sp
+                objs.tracer.Color   = color
+                objs.tracer.Visible = true
+            else
+                objs.tracer.Visible = false
+            end
         end
     end
 end
 
--- ==========================================================
---  TRIGGERBOT SYSTEM (FAST)
--- ==========================================================
-local function performTriggerbot()
-    if not TriggerbotActive then return end
-    if not Surge['Triggerbot']['Enabled'] then return end
-    
-    local target = nil
-    
-    -- If Target mode, only shoot locked target
-    if Surge['Target']['Type'] == "Target" then
-        if LockedTarget and not shouldUnlockTarget(LockedTarget) then
-            target = LockedTarget
+-- Init ESP for existing players
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= lp then createESP(p) end
+end
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function()
+        task.wait(1)
+        createESP(p)
+    end)
+end)
+Players.PlayerRemoving:Connect(removeESP)
+
+RunService.RenderStepped:Connect(updateESP)
+
+-- ══════════════════════════════════════════════════════════════
+--  PLAYER MODIFICATIONS
+-- ══════════════════════════════════════════════════════════════
+
+local function applyPlayerMods()
+    local pm = cfg['Player Modification']
+    local c  = getChar(lp)
+    if not c then return end
+    local hum = c:FindFirstChild("Humanoid")
+    if not hum then return end
+
+    if pm['Movement']['Enabled'] then
+        if pm['Movement']['Speed']['Enabled'] then
+            hum.WalkSpeed = pm['Movement']['Speed']['Value']
         end
-    else
-        -- Automatic mode: shoot current target
-        target = CurrentTarget
+        if pm['Movement']['Jump']['Enabled'] then
+            hum.JumpPower = pm['Movement']['Jump']['Value']
+        end
     end
-    
-    if not target or not target.Character then return end
-    
-    local hrp = target.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    -- Check if in crosshair/FOV
-    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local pos = Camera:WorldToViewportPoint(hrp.Position)
-    
-    if pos.Z <= 0 then return end
-    
-    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
-    
-    if dist > threshold then return end
-    
-    -- Cooldown check
-    local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
-    local now = tick()
-    if now - LastShot < cooldown then return end
-    
-    -- Shoot
-    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-    if tool then
-        pcall(function()
-            tool:Activate()
-            LastShot = now
+end
+
+lp.CharacterAdded:Connect(function()
+    task.wait(1)
+    applyPlayerMods()
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not cfg['Player Modification']['Movement']['Enabled'] or panicActive then return end
+    applyPlayerMods()
+end)
+
+-- ── Weapon Mods (Firerate on tools) ──
+local function applyWeaponMod(tool)
+    if not cfg['Player Modification']['Weapon Modifications']['Enabled'] then return end
+    local wm = cfg['Player Modification']['Weapon Modifications']
+    for weaponName, modData in pairs(wm) do
+        if weaponName == 'Enabled' then continue end
+        if tool.Name:find(weaponName) or weaponName == 'Other Shotguns' then
+            -- Find fire rate or delay values in the tool
+            for _, v in ipairs(tool:GetDescendants()) do
+                if v:IsA("NumberValue") and (v.Name:lower():find("delay") or v.Name:lower():find("cooldown") or v.Name:lower():find("firerate")) then
+                    pcall(function() v.Value = modData['Value'] end)
+                end
+            end
+        end
+    end
+end
+
+lp.CharacterAdded:Connect(function(c)
+    c.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            applyWeaponMod(child)
+        end
+    end)
+end)
+
+-- ── Rapid Fire ──
+RunService.Heartbeat:Connect(function()
+    local rf = cfg['Player Modification']['Rapid Fire']
+    if not rf['Enabled'] or panicActive then return end
+    local tool = getEquippedTool()
+    if not tool then return end
+    -- Apply rapid fire by manipulating tool fire delay
+    for _, v in ipairs(tool:GetDescendants()) do
+        if v:IsA("NumberValue") and (v.Name:lower():find("delay") or v.Name:lower():find("debounce")) then
+            pcall(function() v.Value = rf['Delay'] end)
+        end
+    end
+end)
+
+-- ── Inventory Sorter ──
+local function sortInventory()
+    local si = cfg['Player Modification']['Inventory Sorter']
+    if not si['Enabled'] then return end
+    local c = getChar(lp)
+    if not c then return end
+    local backpack = lp:FindFirstChild("Backpack")
+    if not backpack then return end
+    -- This depends on DaHood UI, we store order config for reference
+    -- Actual sorting would require UI manipulation specific to DaHood's inventory system
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  ANTI TRIP
+-- ══════════════════════════════════════════════════════════════
+
+local function startAntiTrip()
+    RunService.Heartbeat:Connect(function()
+        if not cfg['Anti Trip']['Enabled'] or panicActive then return end
+        local c = getChar(lp)
+        if not c then return end
+        local hum = c:FindFirstChild("Humanoid")
+        if not hum then return end
+
+        local state = hum:GetState()
+        if state == Enum.HumanoidStateType.FallingDown
+        or state == Enum.HumanoidStateType.Ragdoll then
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end
+
+        -- DaHood ragdoll value
+        for _, vname in ipairs({"Ragdoll", "Tripped", "Stumble"}) do
+            local v = c:FindFirstChild(vname)
+            if v and v:IsA("BoolValue") and v.Value then
+                pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+                pcall(function() v.Value = false end)
+            end
+        end
+    end)
+end
+
+startAntiTrip()
+
+-- ══════════════════════════════════════════════════════════════
+--  PANIC GROUND
+-- ══════════════════════════════════════════════════════════════
+
+local function doPanicGround()
+    local pg = cfg['Panic Ground']
+    if not pg['Enabled'] then return end
+    local c = getChar(lp)
+    if not c then return end
+    local root = c:FindFirstChild("HumanoidRootPart")
+    local hum  = c:FindFirstChild("Humanoid")
+    if not root or not hum then return end
+
+    if pg['Mode'] == 'Instant' then
+        local groundY = Workspace:FindFirstChild("Baseplate") and Workspace.Baseplate.Position.Y + 3 or 3
+        local hit = Workspace:Raycast(root.Position, Vector3.new(0, -500, 0))
+        if hit then groundY = hit.Position.Y + 3 end
+
+        local vel = pg['Preserve Velocity'] and root.AssemblyLinearVelocity or Vector3.zero
+        root.CFrame = CFrame.new(Vector3.new(root.Position.X, groundY, root.Position.Z))
+        if pg['Preserve Velocity'] then
+            root.AssemblyLinearVelocity = Vector3.new(vel.X, 0, vel.Z)
+        end
+    elseif pg['Mode'] == 'Smooth' then
+        local speed = pg['Smooth Speed']
+        local groundY = 3
+        local hit = Workspace:Raycast(root.Position, Vector3.new(0, -500, 0))
+        if hit then groundY = hit.Position.Y + 3 end
+        local tween = TweenService:Create(root,
+            TweenInfo.new(math.abs(root.Position.Y - groundY) / speed),
+            {CFrame = CFrame.new(Vector3.new(root.Position.X, groundY, root.Position.Z))}
+        )
+        tween:Play()
+    end
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  SPIDERMAN WALL JUMP
+-- ══════════════════════════════════════════════════════════════
+
+local spiderCooldown = false
+local lastJumpTime   = 0
+
+RunService.Heartbeat:Connect(function()
+    local sp = cfg['Spiderman']
+    if not sp['Enabled'] or panicActive then return end
+    local c = getChar(lp)
+    if not c then return end
+    local root = c:FindFirstChild("HumanoidRootPart")
+    local hum  = c:FindFirstChild("Humanoid")
+    if not root or not hum then return end
+
+    if spiderCooldown then return end
+
+    -- Check wall proximity
+    local dirs = {
+        Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0),
+        Vector3.new(0, 0, 1), Vector3.new(0, 0, -1),
+    }
+    local nearWall = false
+    for _, dir in ipairs(dirs) do
+        local hit = Workspace:Raycast(root.Position, dir * sp['Wall Distance'])
+        if hit and hit.Instance and not hit.Instance:IsDescendantOf(getChar(lp)) then
+            nearWall = true
+            break
+        end
+    end
+
+    if not nearWall then return end
+
+    local tool = getEquippedTool()
+    local jumpPower = (tool and tool.Name:lower():find("knife")) and sp['Knife Jump Power'] or sp['Jump Power']
+
+    if hum:GetState() == Enum.HumanoidStateType.Jumping
+    or hum:GetState() == Enum.HumanoidStateType.Freefall then
+        spiderCooldown = true
+        hum.JumpPower = jumpPower
+        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        root.AssemblyLinearVelocity = Vector3.new(
+            root.AssemblyLinearVelocity.X,
+            jumpPower,
+            root.AssemblyLinearVelocity.Z
+        )
+        task.delay(sp['Cooldown'], function()
+            spiderCooldown = false
+            hum.JumpPower = cfg['Player Modification']['Movement']['Jump']['Value']
         end)
     end
-end
--- ==========================================================
---  ANTI TRIP SYSTEM (SAFE - UNDETECTED)
--- ==========================================================
-local lastAntiTripTime = 0
-local antiTripAttempts = 0
+end)
 
-local function performAntiTrip()
-    if not Surge['Anti Trip']['Enabled'] then return end
-    
-    local now = tick()
-    if now - lastAntiTripTime < 0.1 then return end -- 0.1s interval (slower = safer)
-    lastAntiTripTime = now
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return end
-    
-    -- Only check if actually tripped (PlatformStand is main indicator)
-    if not hum.PlatformStand then return end
-    
-    -- Limit attempts to prevent detection
-    antiTripAttempts = antiTripAttempts + 1
-    if antiTripAttempts > 5 then
-        -- Too many attempts, probably being forced by server
-        return
-    end
-    
-    -- SAFE: Just disable PlatformStand (no BodyGyro, no rapid state changes)
-    hum.PlatformStand = false
-    
-    -- Optional: subtle velocity cap (not instant stop)
-    local vel = hrp.AssemblyLinearVelocity
-    if vel.Magnitude > 50 then
-        hrp.AssemblyLinearVelocity = vel.Unit * 50
-    end
-    
-    -- Reset attempts after 2 seconds of being stable
-    task.delay(2, function()
-        if hum and not hum.PlatformStand then
-            antiTripAttempts = 0
+-- ══════════════════════════════════════════════════════════════
+--  EXTRA (HEADLESS / KORBLOX)
+-- ══════════════════════════════════════════════════════════════
+
+local function applyExtra()
+    local ex = cfg['Extra']
+    local c  = getChar(lp)
+    if not c then return end
+
+    if ex['Headless'] then
+        local head = c:FindFirstChild("Head")
+        if head then
+            local mesh = head:FindFirstChild("Mesh") or head:FindFirstChildOfClass("SpecialMesh")
+            if mesh then mesh.Scale = Vector3.new(0, 0, 0) end
+            for _, part in ipairs(head:GetChildren()) do
+                if part:IsA("BasePart") or part:IsA("Decal") then
+                    pcall(function() part.Transparency = 1 end)
+                end
+            end
+            head.Transparency = 1
         end
+    end
+
+    if ex['Korblox'] then
+        local rightLeg = c:FindFirstChild("Right Leg") or c:FindFirstChild("RightLowerLeg")
+        if rightLeg then
+            -- Apply Korblox effect: make leg invisible / replace
+            rightLeg.Transparency = 1
+        end
+    end
+end
+
+lp.CharacterAdded:Connect(function()
+    task.wait(1)
+    applyExtra()
+end)
+
+if lp.Character then
+    applyExtra()
+end
+
+-- ══════════════════════════════════════════════════════════════
+--  INTRO UI
+-- ══════════════════════════════════════════════════════════════
+
+if cfg['Main']['Intro'] then
+    task.spawn(function()
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "BrightsideIntro"
+        sg.IgnoreGuiInset = true
+        sg.ResetOnSpawn = false
+        sg.Parent = game:GetService("CoreGui")
+
+        local frame = Instance.new("Frame", sg)
+        frame.Size = UDim2.new(0, 400, 0, 100)
+        frame.Position = UDim2.new(0.5, -200, 0, -120)
+        frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        frame.BorderSizePixel = 0
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+
+        local accent = Instance.new("Frame", frame)
+        accent.Size = UDim2.new(1, 0, 0, 3)
+        accent.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+        accent.BorderSizePixel = 0
+
+        local title = Instance.new("TextLabel", frame)
+        title.Size = UDim2.new(1, -20, 0, 40)
+        title.Position = UDim2.new(0, 10, 0, 10)
+        title.Text = "BRIGHTSIDE"
+        title.TextColor3 = Color3.fromRGB(0, 200, 255)
+        title.TextSize = 28
+        title.Font = Enum.Font.GothamBlack
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.BackgroundTransparency = 1
+
+        local sub = Instance.new("TextLabel", frame)
+        sub.Size = UDim2.new(1, -20, 0, 30)
+        sub.Position = UDim2.new(0, 10, 0, 50)
+        sub.Text = "v5.0  |  Loaded Successfully"
+        sub.TextColor3 = Color3.fromRGB(140, 140, 140)
+        sub.TextSize = 14
+        sub.Font = Enum.Font.Gotham
+        sub.TextXAlignment = Enum.TextXAlignment.Left
+        sub.BackgroundTransparency = 1
+
+        -- Slide in
+        local tween = TweenService:Create(frame,
+            TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+            {Position = UDim2.new(0.5, -200, 0, 20)}
+        )
+        tween:Play()
+        task.wait(3)
+        -- Slide out
+        local tween2 = TweenService:Create(frame,
+            TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.In),
+            {Position = UDim2.new(0.5, -200, 0, -120)}
+        )
+        tween2:Play()
+        tween2.Completed:Wait()
+        sg:Destroy()
     end)
 end
 
--- ==========================================================
---  SPIDERMAN WALL JUMP SYSTEM
--- ==========================================================
-local function getWallNormal()
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    local wallDist = Surge.Spiderman['Wall Distance'] or 7
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {char}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    local heights = {Vector3.new(0, -2, 0), Vector3.new(0, 0, 0), Vector3.new(0, 2, 0)}
-    local dirs = {hrp.CFrame.LookVector, -hrp.CFrame.LookVector, hrp.CFrame.RightVector, -hrp.CFrame.RightVector}
-    for _, h in ipairs(heights) do
-        for _, d in ipairs(dirs) do
-            local res = Workspace:Raycast(hrp.Position + h, d * wallDist, params)
-            if res and res.Instance.CanCollide then return res.Normal end
-        end
-    end
-    return nil
-end
-
-local function performWallJump()
-    if not Surge.Spiderman.Enabled then return end
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp or tick() - LastWallJumpTime < (Surge.Spiderman.Cooldown or 0.2) then return end
-    local wallNormal = getWallNormal()
-    if not wallNormal then return end
-    local tool = char:FindFirstChildOfClass("Tool")
-    local isKnife = tool and tool.Name:lower():match("knife")
-    local power = isKnife and Surge.Spiderman['Knife Jump Power'] or Surge.Spiderman['Jump Power']
-    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X * 0.2, 0, hrp.AssemblyLinearVelocity.Z * 0.2)
-    task.wait(0.01)
-    local jumpDirection = (Vector3.new(0, 1.45, 0) + wallNormal * 0.35).Unit
-    hrp.AssemblyLinearVelocity = jumpDirection * (power * 1.35)
-    LastWallJumpTime = tick()
-end
-
--- ==========================================================
---  KORBLOX SYSTEM
--- ==========================================================
-local function applyKorblox()
-    if not Surge.Extra.Korblox then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    if char:FindFirstChild("KorbloxVisual") then return end
-    
-    local rightLeg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightLowerLeg")
-    if not rightLeg then return end
-    
-    local partsToHide = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
-    for _, name in ipairs(partsToHide) do
-        local part = char:FindFirstChild(name)
-        if part and part:IsA("BasePart") then
-            part.Transparency = 1
-            for _, child in pairs(part:GetChildren()) do
-                if child:IsA("Decal") or child:IsA("Texture") then
-                    child.Transparency = 1
-                end
-            end
-        end
-    end
-    
-    local korblox = Instance.new("Part")
-    korblox.Name = "KorbloxVisual"
-    korblox.Size = Vector3.new(1, 2, 1)
-    korblox.CanCollide = false
-    korblox.Transparency = 0
-    
-    local mesh = Instance.new("SpecialMesh")
-    mesh.MeshType = Enum.MeshType.FileMesh
-    mesh.MeshId = "rbxassetid://139607718"
-    mesh.TextureId = "rbxassetid://139607805"
-    mesh.Scale = Vector3.new(1.05, 1.05, 1.05)
-    mesh.Parent = korblox
-    
-    local weld = Instance.new("Weld")
-    weld.Part0 = rightLeg
-    weld.Part1 = korblox
-    weld.C0 = CFrame.new(0, 0, 0)
-    weld.C1 = CFrame.new(0, 0, 0)
-    weld.Parent = korblox
-    
-    korblox.Parent = char
-end
-
--- ==========================================================
---  HEADLESS SYSTEM
--- ==========================================================
-local function applyHeadless()
-    if not Surge.Extra.Headless then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local head = char:FindFirstChild("Head")
-    if not head then return end
-    
-    head.Transparency = 1
-    for _, child in pairs(head:GetChildren()) do
-        if child:IsA("Decal") or child:IsA("Texture") then
-            child.Transparency = 1
-        end
-    end
-end
-
--- ==========================================================
---  PANIC GROUND SYSTEM
--- ==========================================================
-local function performPanicGround()
-    if not Surge['Panic Ground']['Enabled'] then return end
-    
-    local char = LocalPlayer.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {char, Workspace.CurrentCamera}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -5000, 0), params)
-    if result then
-        hrp.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0))
-        print("[Panic Ground] Teleported to ground")
-    end
-end
-
--- ==========================================================
+-- ══════════════════════════════════════════════════════════════
 --  KEYBIND HANDLER
--- ==========================================================
-local Keybinds = Surge['Main']['Keybinds']
+-- ══════════════════════════════════════════════════════════════
 
-UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
-    
-    local now = tick()
-    
-    -- ESP Toggle
-    local espKey = getKeyCodeFromString(Keybinds['ESP Toggle'] or 'T')
-    if espKey and input.KeyCode == espKey then
-        ESPEnabled = not ESPEnabled
-        print("ESP:", ESPEnabled and "ON" or "OFF")
-        if not ESPEnabled then
-            for _, drawings in pairs(ESPCache) do
-                for _, dr in pairs(drawings) do dr.Visible = false end
-            end
-        end
-        return
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    local kc = input.KeyCode
+
+    -- Panic
+    if kc == getKey('Panic') then
+        setPanic(not panicActive)
     end
-    
+
+    -- Silent Aim toggle
+    if kc == getKey('Silent Aim') then
+        cfg['Silent Aim']['Enabled'] = not cfg['Silent Aim']['Enabled']
+        notify("Silent Aim: " .. (cfg['Silent Aim']['Enabled'] and "ON" or "OFF"))
+    end
+
     -- Lock Target
-    local lockKey = getKeyCodeFromString(Keybinds['Lock Target'] or 'Z')
-    if lockKey and input.KeyCode == lockKey then
-        if LockedTarget then
-            LockedTarget = nil
-            print("Lock cleared")
+    if kc == getKey('Lock Target') then
+        if lockedTarget then
+            lockedTarget = nil
+            notify("Target unlocked")
         else
-            local cursorTarget = getTargetFromCursor()
-            if cursorTarget then
-                LockedTarget = cursorTarget
-                print("Locked:", cursorTarget.Name)
+            local t = getCamlockTarget()
+            if t then
+                lockOnTarget(t)
+                notify("Locked: " .. t.Name)
             end
         end
-        return
     end
-    
-    -- Triggerbot Activate (Universal key - V by default)
-    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
-    if trigKey and input.KeyCode == trigKey then
-        if not Surge['Triggerbot']['Enabled'] then return end
-        
-        local mode = Surge['Triggerbot']['Mode'] or 'Hold'
-        if mode == 'Toggle' then
-            TriggerbotActive = not TriggerbotActive
-            print("Triggerbot:", TriggerbotActive and "ON" or "OFF")
-        else
-            TriggerbotActive = true
-            print("Triggerbot: HOLD")
-        end
-        
-        -- Also activate rapid fire if enabled
-        if Surge['Player Modification']['Rapid Fire']['Enabled'] then
-            RapidFireActive = true
-        end
-        return
+
+    -- ESP Toggle
+    if kc == getKey('ESP Toggle') then
+        cfg['Raid Awareness']['Enabled'] = not cfg['Raid Awareness']['Enabled']
+        notify("ESP: " .. (cfg['Raid Awareness']['Enabled'] and "ON" or "OFF"))
     end
-    
-    -- Spiderman Wall Jump
-    if input.KeyCode == Enum.KeyCode.Space then
-        local jumpNow = tick()
-        if jumpNow - LastJumpTime < 0.4 then
-            JumpCount = JumpCount + 1
-        else
-            JumpCount = 1
-        end
-        LastJumpTime = jumpNow
-        
-        if JumpCount >= 2 or not Surge.Spiderman['Require Double Jump'] then
-            performWallJump()
-        end
-        return
+
+    -- Speed toggle
+    if kc == getKey('Speed') then
+        local sm = cfg['Player Modification']['Movement']['Speed']
+        sm['Enabled'] = not sm['Enabled']
+        notify("Speed: " .. (sm['Enabled'] and "ON" or "OFF"))
     end
-    
+
+    -- Jump toggle
+    if kc == getKey('Jump Power') then
+        local jm = cfg['Player Modification']['Movement']['Jump']
+        jm['Enabled'] = not jm['Enabled']
+        notify("Jump: " .. (jm['Enabled'] and "ON" or "OFF"))
+    end
+
     -- Panic Ground
-    local panicGroundKey = getKeyCodeFromString(Keybinds['Panic Ground'] or 'X')
-    if panicGroundKey and input.KeyCode == panicGroundKey then
-        performPanicGround()
-        return
+    if kc == getKey('Panic Ground') then
+        doPanicGround()
     end
-    
-    -- Panic Key
-    local panicKey = getKeyCodeFromString(Keybinds['Panic'] or 'L')
-    if panicKey and input.KeyCode == panicKey then
-        if Surge['Main']['Panic']['Enabled'] then
-            ESPEnabled = false
-            LockedTarget = nil
-            CurrentTarget = nil
-            TriggerbotActive = false
-            RapidFireActive = false
-            
-            for _, drawings in pairs(ESPCache) do
-                for _, dr in pairs(drawings) do dr.Visible = false end
-            end
-            print("!!! PANIC !!!")
+
+    -- Inventory Sorter
+    if kc == getKey('Inventory Sorter') then
+        sortInventory()
+        notify("Inventory sorted")
+    end
+
+    -- Triggerbot (Hold mode start / Toggle mode flip)
+    if kc == getKey('Triggerbot') then
+        if cfg['Triggerbot']['Mode'] == 'Toggle' then
+            tbToggled = not tbToggled
+            notify("Triggerbot: " .. (tbToggled and "ON" or "OFF"))
+            if tbToggled then startTBLoop() end
+        elseif cfg['Triggerbot']['Mode'] == 'Hold' then
+            tbActive = true
+            startTBLoop()
         end
     end
 end)
 
-UserInputService.InputEnded:Connect(function(input, processed)
-    if processed then return end
-    
-    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
-    if trigKey and input.KeyCode == trigKey then
-        if Surge['Triggerbot']['Enabled'] and Surge['Triggerbot']['Mode'] == 'Hold' then
-            TriggerbotActive = false
-            RapidFireActive = false
-            print("Triggerbot: OFF")
+UIS.InputEnded:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == getKey('Triggerbot') then
+        if cfg['Triggerbot']['Mode'] == 'Hold' then
+            tbActive = false
         end
     end
 end)
 
--- ==========================================================
---  MAIN LOOP
--- ==========================================================
-RunService.RenderStepped:Connect(function()
-    CurrentTarget = getBestTarget()
-    UpdateESP()
-    performTriggerbot()
-    
-    applyHeadless()
-    applyKorblox()
-    performAntiTrip()
+-- ══════════════════════════════════════════════════════════════
+--  CHARACTER RESPAWN CLEANUP
+-- ══════════════════════════════════════════════════════════════
+
+lp.CharacterAdded:Connect(function(c)
+    lockedTarget = nil
+    task.wait(1)
+    applyPlayerMods()
+    applyExtra()
+    startAntiTrip()
 end)
 
-Players.PlayerRemoving:Connect(function(player)
-    if player == LockedTarget then LockedTarget = nil end
-    if player == CurrentTarget then CurrentTarget = nil end
-    RemoveESP(player)
-end)
-
-for _, player in pairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then
-        CreateESP(player)
-    end
-end
-
--- ==========================================================
---  SILENT AIM
--- ==========================================================
-local mouse = LocalPlayer:GetMouse()
-local mt = getrawmetatable(mouse)
-setreadonly(mt, false)
-local old = mt.__index
-
-mt.__index = newcclosure(function(self, key)
-    if key:lower() == "hit" or key:lower() == "target" then
-        if Surge["Silent Aimbot"]["Enabled"] and CurrentTarget then
-            local tgt = CurrentTarget
-            if tgt and tgt.Character then
-                local char = tgt.Character
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                local head = char:FindFirstChild("Head")
-                
-                local hitPartStr = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"] or "Closest Point"
-                local targetPart = nil
-                
-                if hitPartStr == "Head" and head then
-                    targetPart = head
-                elseif hitPartStr == "HumanoidRootPart" and hrp then
-                    targetPart = hrp
-                else
-                    if hrp and head then
-                        local mousePos = Mouse.Hit.Position
-                        local headDist = (head.Position - mousePos).Magnitude
-                        local hrpDist = (hrp.Position - mousePos).Magnitude
-                        targetPart = headDist < hrpDist and head or hrp
-                    else
-                        targetPart = head or hrp
-                    end
-                end
-                
-                if targetPart then
-                    local vel = targetPart.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
-                    local p = Surge["Silent Aimbot"]["Prediction"]
-                    local offset = Vector3.new(vel.X * (p.X or 0), vel.Y * (p.Y or 0), vel.Z * (p.Z or 0))
-                    
-                    if Surge["Silent Aimbot"]["Prediction"]["Power"]["Enabled"] then
-                        local power = Surge["Silent Aimbot"]["Prediction"]["Power"]["Prediction Power"] or 1.042
-                        offset = offset * power
-                    end
-                    
-                    if key:lower() == "hit" then
-                        return CFrame.new(targetPart.Position + offset)
-                    else
-                        return targetPart
-                    end
-                end
-            end
-        end
-    end
-    return old(self, key)
-end)
-
-setreadonly(mt, true)
-
-print("Brightside V4 Loaded Successfully!")
-print("Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
-print("Features: Fast Triggerbot, Cursor Targeting, Safe Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
-
--- ==========================================================
---  LOAD EXTERNAL SCRIPT
--- ==========================================================
-task.spawn(function()
-    local success, err = pcall(function()
-        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D")
-        if externalScript and #externalScript > 0 then
-            loadstring(externalScript)()
-            print("External features loaded successfully")
-        end
-    end)
-    
-    if not success then
-        warn("Failed to load external features:", err)
-        print("Running with core features only")
-    end
-end)
+-- ══════════════════════════════════════════════════════════════
+print("[Brightside] v5.0 loaded. All systems active.")
