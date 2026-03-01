@@ -410,63 +410,46 @@ local function UpdateESP()
 end
 
 -- ===========================================================
---  TRIGGERBOT (original + knife check + configurable delay)
+--  TRIGGERBOT (rapid fire style - instant spam when target in FOV)
 -- ===========================================================
-local function performTriggerbot()
-    if not TriggerbotActive then return end
-    if not Surge['Triggerbot']['Enabled'] then return end
-    if panicActive then return end
-    if isKnifeEquipped() then return end
-
-    local target = nil
+local function getTBTarget()
     if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
-            target = LockedTarget
+            return LockedTarget
         end
-    else
-        target = CurrentTarget
+        return nil
     end
-    if not target or not target.Character then return end
+    return CurrentTarget
+end
 
+local function isTargetInTBFOV(target)
+    if not target or not target.Character then return false end
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    if not hrp then return false end
     local pos = Camera:WorldToViewportPoint(hrp.Position)
-    if pos.Z <= 0 then return end
-
-    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
-    if dist > threshold then return end
-
-    -- Use Fire Rate config if present, else Timing.Cooldown
-    local cooldown = 0.001
-    if Surge['Triggerbot']['Fire Rate'] and Surge['Triggerbot']['Fire Rate']['Enabled'] then
-        cooldown = Surge['Triggerbot']['Fire Rate']['Delay'] or 0.001
-    else
-        cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
-    end
-
-    local now = tick()
-    if now - LastShot < cooldown then return end
-
-    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-    if tool and not isKnifeEquipped() then
-        pcall(function()
-            tool:Activate()
-            LastShot = now
-        end)
-    end
+    if pos.Z <= 0 then return false end
+    local dist = (Vector2.new(pos.X, pos.Y) - Vector2.new(Mouse.X, Mouse.Y)).Magnitude
+    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 200)
+    return dist <= threshold
 end
 
 local function startTBLoop()
     task.spawn(function()
         while TriggerbotActive do
-            performTriggerbot()
-            task.wait(0.001)
+            if Surge['Triggerbot']['Enabled'] and not panicActive and not isKnifeEquipped() then
+                local target = getTBTarget()
+                if target and isTargetInTBFOV(target) then
+                    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+                    if tool and not isKnifeEquipped() then
+                        pcall(function() tool:Activate() end)
+                    end
+                end
+            end
+            task.wait() -- fastest possible - next resumption cycle
         end
     end)
 end
+
 
 -- ===========================================================
 --  ANTI TRIP (original safe method - untouched)
