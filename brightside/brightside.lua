@@ -369,11 +369,13 @@ local function performTriggerbot()
     
     local target = nil
     
+    -- If Target mode, only shoot locked target
     if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             target = LockedTarget
         end
     else
+        -- Automatic mode: shoot current target
         target = CurrentTarget
     end
     
@@ -382,20 +384,23 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
+    -- Check if in crosshair/FOV
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     
     if pos.Z <= 0 then return end
     
     local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 25 or (Surge['Triggerbot']['FOV']['Circle Value'] or 60)
+    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
     
     if dist > threshold then return end
     
+    -- Cooldown check
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
     if now - LastShot < cooldown then return end
     
+    -- Shoot
     local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
     if tool then
         pcall(function()
