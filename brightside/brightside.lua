@@ -29,6 +29,7 @@ print("[Brightside] Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other"
 local utility = {}
 getgenv().config = { enable = true, delay = 0.000000000001 }
 utility.get_gun = function()
+    if not LocalPlayer.Character then return nil end
     for _, tool in next, LocalPlayer.Character:GetChildren() do
         if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then return tool end
     end
