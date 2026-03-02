@@ -1,56 +1,68 @@
--- BRIGHTSIDE V5 - BASED ON WORKING V4 SOURCE
--- Added: Panic toggle (no re-execute), knife check TB, unlock on kill,
---        dead player skip, configurable TB fire rate, improved anti trip
--- Games: Da Hood (2788229376), Hood Customs (9825515356)
+-- ==========================================================
+--  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP)
+--  Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
+--  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
+--  Games: Da Hood (2788229376), Hood Customs (9825515356)
+-- ==========================================================
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local UserInputService  = game:GetService("UserInputService")
-local TweenService      = game:GetService("TweenService")
 local Workspace         = game:GetService("Workspace")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 local Mouse             = LocalPlayer:GetMouse()
 
+-- ==========================================================
+--  CONFIG ACCESS
+-- ==========================================================
 local Surge = getgenv().Surge
-if not Surge then warn("[Brightside] No config found.") return end
 
--- STATE
-local ESPCache         = {}
-local LockedTarget     = nil
-local CurrentTarget    = nil
-local ESPEnabled       = Surge['Raid Awareness']['Enabled']
+-- ==========================================================
+--  STATE VARIABLES
+-- ==========================================================
+local ESPCache = {}
+local LockedTarget = nil
+local CurrentTarget = nil
+local ESPEnabled = Surge['Raid Awareness']['Enabled']
 local TriggerbotActive = false
-local LastShot         = 0
-local RapidFireActive  = false
+local LastShot = 0
+local RapidFireActive = false
+local RapidFireLastFire = 0
+
+-- EXTRA STATE
 local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
+local LastToggleTime = 0
 
--- PANIC STATE
-local panicActive = false
-local savedStates = {}
-
--- GAME DETECTION
-local placeId       = game.PlaceId
-local isDaHood      = (placeId == 2788229376)
+-- ==========================================================
+--  GAME DETECTION
+-- ==========================================================
+local placeId = game.PlaceId
+local isDaHood = (placeId == 2788229376)
 local isHoodCustoms = (placeId == 9825515356)
-local isDaHoodGame  = isDaHood or isHoodCustoms
-print("[Brightside] Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other", "| PlaceID:", placeId)
+local isDaHoodGame = isDaHood or isHoodCustoms
 
--- ===========================================================
---  RAPID FIRE (original - untouched)
--- ===========================================================
+print("[Brightside] Game detected:", isDaHoodGame and "Da Hood / Hood Customs" or "Other", "| PlaceID:", placeId)
+
+-- ==========================================================
+--  RAPID FIRE SYSTEM
+-- ==========================================================
 local utility = {}
 print("Welcome")
 getgenv().config = { enable = true, delay = 0.000000000001 }
 utility.get_gun = function()
-    for _, tool in next, LocalPlayer.Character:GetChildren() do
+    for _, tool in next, game.Players.LocalPlayer.Character:GetChildren() do
         if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then return tool end
     end
 end
-utility.rapid = function(tool) tool:Activate() end
+
+utility.rapid = function(tool)
+    tool:Activate()
+end
+
 getgenv().is_firing = false
 
-UserInputService.InputBegan:Connect(function(i)
+game:GetService("UserInputService").InputBegan:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then
         local gun = utility.get_gun()
         if config.enable and gun and not is_firing then
@@ -62,138 +74,91 @@ UserInputService.InputBegan:Connect(function(i)
         end
     end
 end)
-UserInputService.InputEnded:Connect(function(input)
+game:GetService("UserInputService").InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         is_firing = false
     end
 end)
 
--- ===========================================================
---  UTILITY
--- ===========================================================
+-- ==========================================================
+--  UTILITY FUNCTIONS
+-- ==========================================================
 local function getKeyCodeFromString(keyName)
     if not keyName or type(keyName) ~= "string" then return nil end
-    local ok, kc = pcall(function() return Enum.KeyCode[keyName:upper()] end)
-    if ok and kc then return kc end
+    local upperKeyName = keyName:upper()
+    
+    local success, keyCode = pcall(function()
+        return Enum.KeyCode[upperKeyName]
+    end)
+    
+    if success and keyCode then return keyCode end
+    
+    if upperKeyName:match("^F%d+$") then
+        local fKeyNum = tonumber(upperKeyName:sub(2))
+        if fKeyNum and fKeyNum >= 1 and fKeyNum <= 12 then
+            success, keyCode = pcall(function()
+                return Enum.KeyCode["F" .. fKeyNum]
+            end)
+            if success and keyCode then return keyCode end
+        end
+    end
+    
     return nil
 end
 
-local function notify(msg)
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "Brightside", Text = msg, Duration = 3
-        })
-    end)
-end
-
--- ===========================================================
---  DAHOOD KNOCKED CHECK (NEW)
--- ===========================================================
-local function isKnocked(player)
-    local c = player and player.Character
-    if not c then return true end
-    local hum = c:FindFirstChild("Humanoid")
-    if not hum then return true end
-    if hum.Health <= 0 then return true end
-    if hum:GetState() == Enum.HumanoidStateType.Dead then return true end
-    local kv = c:FindFirstChild("Knocked") or hum:FindFirstChild("Knocked")
-    if kv and kv.Value == true then return true end
-    return false
-end
-
--- ===========================================================
---  KNIFE CHECK (NEW)
--- ===========================================================
-local KNIFE_NAMES = {"knife", "bowie", "blade", "cleaver", "combat knife"}
-
-local function isKnifeEquipped()
-    local c = LocalPlayer.Character
-    if not c then return false end
-    local tool = c:FindFirstChildOfClass("Tool")
-    if not tool then return false end
-    local name = tool.Name:lower()
-    local kc = Surge['Triggerbot']['Knife Check']
-    if kc and kc['Enabled'] ~= false and kc['Knife Names'] then
-        for _, kname in ipairs(kc['Knife Names']) do
-            if name:find(kname:lower()) then return true end
-        end
-        return false
-    end
-    for _, kname in ipairs(KNIFE_NAMES) do
-        if name:find(kname) then return true end
-    end
-    return false
-end
-
--- ===========================================================
---  UNLOCK ON KILL WATCHER (NEW)
--- ===========================================================
-local function watchLockedTarget(player)
-    if not player or not player.Character then return end
-    local c = player.Character
-    local hum = c:FindFirstChild("Humanoid")
-    if hum then
-        hum.Died:Once(function()
-            if LockedTarget == player then
-                LockedTarget = nil
-                notify("Target unlocked")
-            end
-        end)
-    end
-    local function hookKnocked(kv)
-        kv:GetPropertyChangedSignal("Value"):Connect(function()
-            if kv.Value == true and LockedTarget == player then
-                LockedTarget = nil
-                notify("Target unlocked")
-            end
-        end)
-    end
-    local kv = c:FindFirstChild("Knocked")
-    if kv then hookKnocked(kv) end
-    c.ChildAdded:Connect(function(child)
-        if child.Name == "Knocked" then hookKnocked(child) end
-    end)
-end
-
--- ===========================================================
---  TARGET FUNCTIONS (original + isKnocked skip added)
--- ===========================================================
+-- ==========================================================
+--  MOUSE CURSOR TARGETING
+-- ==========================================================
 local function getTargetFromCursor()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local closestPlayer = nil
     local closestDist = math.huge
+    
     for _, player in pairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
+        
         local char = player.Character
         if not char then continue end
+        
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
+        
         local hum = char:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then continue end
-        -- NEW: skip knocked
-        if Surge['Target Checks'] and Surge['Target Checks']['Knocked'] and isKnocked(player) then continue end
+        
         local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
         if not onScreen or screenPos.Z <= 0 then continue end
+        
         local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        
         local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
+        
         if dist < closestDist and dist <= fov then
             closestDist = dist
             closestPlayer = player
         end
     end
+    
     return closestPlayer, closestDist
+end
+
+local function playerFromMouse()
+    return getTargetFromCursor()
 end
 
 local function isVisible(target)
     if not Surge['Target']['Visible Check'] then return true end
     if not target or not target.Character then return false end
+    
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
+    
     local origin = Camera.CFrame.Position
     local direction = (hrp.Position - origin)
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
     raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    
     local result = Workspace:Raycast(origin, direction, raycastParams)
     if result then
         return result.Instance:IsDescendantOf(target.Character)
@@ -205,25 +170,39 @@ local function shouldUnlockTarget(target)
     if not target or not target.Character then return true end
     local char = target.Character
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if Surge['Target']['Unlock']['Knocked'] and hum and hum.Health <= 0 then return true end
-    if Surge['Target']['Unlock']['Knocked'] and isKnocked(target) then return true end
+    
+    if Surge['Target']['Unlock']['Knocked'] and hum and hum.Health <= 0 then
+        return true
+    end
+    
     if Surge['Target']['Unlock']['Grabbed'] then
-        if char:FindFirstChild("GRABBING_CONSTRAINT") or (hum and hum.PlatformStand) then
+        if char:FindFirstChild("GRABBING_CONSTRAINT") or 
+           (hum and hum.PlatformStand) then
             return true
         end
     end
     return false
 end
 
+-- ==========================================================
+--  TARGET SYSTEM
+-- ==========================================================
 local function getBestTarget()
     local targetType = Surge['Target']['Type'] or "Automatic"
+    
     if targetType == "Target" then
         if LockedTarget then
-            if shouldUnlockTarget(LockedTarget) then LockedTarget = nil; return nil end
-            if isVisible(LockedTarget) then return LockedTarget end
+            if shouldUnlockTarget(LockedTarget) then
+                LockedTarget = nil
+                return nil
+            end
+            if isVisible(LockedTarget) then
+                return LockedTarget
+            end
         end
         return nil
     end
+    
     if LockedTarget and not shouldUnlockTarget(LockedTarget) then
         local char = LockedTarget.Character
         if char then
@@ -234,74 +213,26 @@ local function getBestTarget()
                     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
                     local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                     local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
-                    if dist <= fov and isVisible(LockedTarget) then return LockedTarget end
+                    if dist <= fov and isVisible(LockedTarget) then
+                        return LockedTarget
+                    end
                 end
             end
         end
         LockedTarget = nil
     end
+    
     local cursorTarget = getTargetFromCursor()
-    if cursorTarget and isVisible(cursorTarget) then return cursorTarget end
+    if cursorTarget and isVisible(cursorTarget) then
+        return cursorTarget
+    end
+    
     return nil
 end
 
--- ===========================================================
---  PANIC TOGGLE (NEW - replaces old one-way panic)
--- ===========================================================
-local function setPanic(enabled)
-    local pc = Surge['Main']['Panic']
-    if enabled then
-        if pc['Disable Silent Aim'] then
-            savedStates['sa'] = Surge['Silent Aimbot']['Enabled']
-            Surge['Silent Aimbot']['Enabled'] = false
-        end
-        if pc['Disable Aim Assist'] then
-            savedStates['aa'] = Surge['Aim Assist']['Enabled']
-            Surge['Aim Assist']['Enabled'] = false
-        end
-        if pc['Disable Trigger Bot'] then
-            savedStates['tb'] = Surge['Triggerbot']['Enabled']
-            Surge['Triggerbot']['Enabled'] = false
-            TriggerbotActive = false
-        end
-        if pc['Disable Visuals'] then
-            savedStates['esp'] = ESPEnabled
-            ESPEnabled = false
-        end
-        if pc['Disable Raid Awareness'] then
-            savedStates['ra'] = Surge['Raid Awareness']['Enabled']
-            Surge['Raid Awareness']['Enabled'] = false
-        end
-        if pc['Disable Player Modifications'] then
-            savedStates['spd'] = Surge['Player Modification']['Movement']['Speed Modifications']['Enabled']
-            savedStates['jmp'] = Surge['Player Modification']['Movement']['Jump Modifications']['Enabled']
-            Surge['Player Modification']['Movement']['Speed Modifications']['Enabled'] = false
-            Surge['Player Modification']['Movement']['Jump Modifications']['Enabled'] = false
-        end
-        LockedTarget = nil
-        CurrentTarget = nil
-        for _, drawings in pairs(ESPCache) do
-            for _, dr in pairs(drawings) do pcall(function() dr.Visible = false end) end
-        end
-        panicActive = true
-        notify("PANIC ON")
-    else
-        if savedStates['sa']  ~= nil then Surge['Silent Aimbot']['Enabled'] = savedStates['sa'] end
-        if savedStates['aa']  ~= nil then Surge['Aim Assist']['Enabled']    = savedStates['aa'] end
-        if savedStates['tb']  ~= nil then Surge['Triggerbot']['Enabled']    = savedStates['tb'] end
-        if savedStates['esp'] ~= nil then ESPEnabled                        = savedStates['esp'] end
-        if savedStates['ra']  ~= nil then Surge['Raid Awareness']['Enabled']= savedStates['ra'] end
-        if savedStates['spd'] ~= nil then Surge['Player Modification']['Movement']['Speed Modifications']['Enabled'] = savedStates['spd'] end
-        if savedStates['jmp'] ~= nil then Surge['Player Modification']['Movement']['Jump Modifications']['Enabled']  = savedStates['jmp'] end
-        savedStates = {}
-        panicActive = false
-        notify("PANIC OFF")
-    end
-end
-
--- ===========================================================
---  ESP (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  ESP FUNCTIONS
+-- ==========================================================
 local function CreateESP(player)
     if ESPCache[player] then return ESPCache[player] end
     local d = {
@@ -334,33 +265,49 @@ local function UpdateESP()
         end
         return
     end
+    
     local maxDist = Surge['Raid Awareness']['Max Render Distance'] or 1000
+    
     for _, player in pairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
+        
         local char = player.Character
         if not char then RemoveESP(player); continue end
+        
         local hrp = char:FindFirstChild("HumanoidRootPart")
         local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum or hum.Health <= 0 then RemoveESP(player); continue end
+        
+        if not hrp or not hum or hum.Health <= 0 then 
+            RemoveESP(player); continue 
+        end
+        
         if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            if (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude > maxDist then
-                RemoveESP(player); continue
+            if (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude > maxDist then 
+                RemoveESP(player); continue 
             end
         end
+        
         local feetPos = hrp.Position - Vector3.new(0,3,0)
         local screenPos = Camera:WorldToViewportPoint(feetPos)
+        
         if screenPos.Z <= 0 then
             local drawings = ESPCache[player]
-            if drawings then for _, dr in pairs(drawings) do dr.Visible = false end end
+            if drawings then 
+                for _, dr in pairs(drawings) do dr.Visible = false end 
+            end
             continue
         end
+        
         local drawings = CreateESP(player)
         if not drawings then continue end
+        
         local sp = Vector2.new(screenPos.X, screenPos.Y)
         local isTarget = (player == CurrentTarget)
         local targetColor = Surge['Target']['Color'] or Color3.fromRGB(0, 255, 0)
+        
         local boxCol = isTarget and targetColor or Surge['Raid Awareness']['Box']['Other Color']
         local nameCol = isTarget and targetColor or Surge['Raid Awareness']['Name']['Other Color']
+        
         local headPos = hrp.Position + Vector3.new(0,6,0)
         local headScreen = Camera:WorldToViewportPoint(headPos)
         if headScreen.Z > 0 then
@@ -368,6 +315,7 @@ local function UpdateESP()
             local h = math.abs(sp.Y - headSp.Y)
             local w = h * 0.5
             local boxPos = Vector2.new(sp.X - w/2, headSp.Y)
+            
             if Surge['Raid Awareness']['Box']['Enabled'] then
                 drawings.BoxOutline.Size = Vector2.new(w+4, h+4)
                 drawings.BoxOutline.Position = Vector2.new(boxPos.X-2, boxPos.Y-2)
@@ -380,6 +328,7 @@ local function UpdateESP()
                 drawings.BoxOutline.Visible = false; drawings.Box.Visible = false
             end
         end
+        
         if Surge['Raid Awareness']['Name']['Enabled'] then
             local t = Surge['Raid Awareness']['Name']['Type'] or 'Display'
             drawings.Name.Text = t == 'Display' and player.DisplayName or player.Name
@@ -389,6 +338,7 @@ local function UpdateESP()
         else
             drawings.Name.Visible = false
         end
+        
         if Surge['Raid Awareness']['Tracer']['Enabled'] then
             drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
             drawings.Tracer.To = sp
@@ -397,6 +347,7 @@ local function UpdateESP()
         else
             drawings.Tracer.Visible = false
         end
+        
         if Surge['Raid Awareness']['Distance']['Enabled'] and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
             local d = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
             drawings.Distance.Text = math.floor(d) .. " studs"
@@ -409,22 +360,20 @@ local function UpdateESP()
     end
 end
 
--- ===========================================================
---  TRIGGERBOT (rapid fire style - instant spam when target in FOV)
--- ===========================================================
+-- ==========================================================
+--  TRIGGERBOT SYSTEM (FAST)
+-- ==========================================================
 local function performTriggerbot()
     if not TriggerbotActive then return end
     if not Surge['Triggerbot']['Enabled'] then return end
     
     local target = nil
     
-    -- If Target mode, only shoot locked target
     if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             target = LockedTarget
         end
     else
-        -- Automatic mode: shoot current target
         target = CurrentTarget
     end
     
@@ -433,23 +382,20 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Check if in crosshair/FOV
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     
     if pos.Z <= 0 then return end
     
     local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
+    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 25 or (Surge['Triggerbot']['FOV']['Circle Value'] or 60)
     
     if dist > threshold then return end
     
-    -- Cooldown check
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
     if now - LastShot < cooldown then return end
     
-    -- Shoot
     local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
     if tool then
         pcall(function()
@@ -459,31 +405,46 @@ local function performTriggerbot()
     end
 end
 
-
--- ===========================================================
---  ANTI TRIP (original safe method - untouched)
--- ===========================================================
+-- ==========================================================
+--  ANTI TRIP SYSTEM (SAFE - UNDETECTED)
+-- ==========================================================
 local lastAntiTripTime = 0
 local antiTripAttempts = 0
 
 local function performAntiTrip()
     if not Surge['Anti Trip']['Enabled'] then return end
+    
     local now = tick()
-    if now - lastAntiTripTime < 0.1 then return end
+    if now - lastAntiTripTime < 0.1 then return end -- 0.1s interval (slower = safer)
     lastAntiTripTime = now
+    
     local char = LocalPlayer.Character
     if not char then return end
+    
     local hum = char:FindFirstChildOfClass("Humanoid")
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then return end
+    
+    -- Only check if actually tripped (PlatformStand is main indicator)
     if not hum.PlatformStand then return end
+    
+    -- Limit attempts to prevent detection
     antiTripAttempts = antiTripAttempts + 1
-    if antiTripAttempts > 5 then return end
+    if antiTripAttempts > 5 then
+        -- Too many attempts, probably being forced by server
+        return
+    end
+    
+    -- SAFE: Just disable PlatformStand (no BodyGyro, no rapid state changes)
     hum.PlatformStand = false
+    
+    -- Optional: subtle velocity cap (not instant stop)
     local vel = hrp.AssemblyLinearVelocity
     if vel.Magnitude > 50 then
         hrp.AssemblyLinearVelocity = vel.Unit * 50
     end
+    
+    -- Reset attempts after 2 seconds of being stable
     task.delay(2, function()
         if hum and not hum.PlatformStand then
             antiTripAttempts = 0
@@ -491,9 +452,9 @@ local function performAntiTrip()
     end)
 end
 
--- ===========================================================
---  SPIDERMAN (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  SPIDERMAN WALL JUMP SYSTEM
+-- ==========================================================
 local function getWallNormal()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -502,7 +463,7 @@ local function getWallNormal()
     local params = RaycastParams.new()
     params.FilterDescendantsInstances = {char}
     params.FilterType = Enum.RaycastFilterType.Blacklist
-    local heights = {Vector3.new(0,-2,0), Vector3.new(0,0,0), Vector3.new(0,2,0)}
+    local heights = {Vector3.new(0, -2, 0), Vector3.new(0, 0, 0), Vector3.new(0, 2, 0)}
     local dirs = {hrp.CFrame.LookVector, -hrp.CFrame.LookVector, hrp.CFrame.RightVector, -hrp.CFrame.RightVector}
     for _, h in ipairs(heights) do
         for _, d in ipairs(dirs) do
@@ -530,116 +491,111 @@ local function performWallJump()
     LastWallJumpTime = tick()
 end
 
--- ===========================================================
---  KORBLOX (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  KORBLOX SYSTEM
+-- ==========================================================
 local function applyKorblox()
     if not Surge.Extra.Korblox then return end
+    
     local char = LocalPlayer.Character
-    if not char or char:FindFirstChild("KorbloxVisual") then return end
+    if not char then return end
+    if char:FindFirstChild("KorbloxVisual") then return end
+    
     local rightLeg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightLowerLeg")
     if not rightLeg then return end
-    local partsToHide = {"Right Leg","RightUpperLeg","RightLowerLeg","RightFoot"}
+    
+    local partsToHide = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
     for _, name in ipairs(partsToHide) do
         local part = char:FindFirstChild(name)
         if part and part:IsA("BasePart") then
             part.Transparency = 1
             for _, child in pairs(part:GetChildren()) do
-                if child:IsA("Decal") or child:IsA("Texture") then child.Transparency = 1 end
+                if child:IsA("Decal") or child:IsA("Texture") then
+                    child.Transparency = 1
+                end
             end
         end
     end
+    
     local korblox = Instance.new("Part")
     korblox.Name = "KorbloxVisual"
     korblox.Size = Vector3.new(1, 2, 1)
     korblox.CanCollide = false
     korblox.Transparency = 0
+    
     local mesh = Instance.new("SpecialMesh")
     mesh.MeshType = Enum.MeshType.FileMesh
     mesh.MeshId = "rbxassetid://139607718"
     mesh.TextureId = "rbxassetid://139607805"
     mesh.Scale = Vector3.new(1.05, 1.05, 1.05)
     mesh.Parent = korblox
+    
     local weld = Instance.new("Weld")
     weld.Part0 = rightLeg
     weld.Part1 = korblox
-    weld.C0 = CFrame.new(0,0,0)
-    weld.C1 = CFrame.new(0,0,0)
+    weld.C0 = CFrame.new(0, 0, 0)
+    weld.C1 = CFrame.new(0, 0, 0)
     weld.Parent = korblox
+    
     korblox.Parent = char
 end
 
--- ===========================================================
---  HEADLESS (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  HEADLESS SYSTEM
+-- ==========================================================
 local function applyHeadless()
     if not Surge.Extra.Headless then return end
+    
     local char = LocalPlayer.Character
     if not char then return end
+    
     local head = char:FindFirstChild("Head")
     if not head then return end
+    
     head.Transparency = 1
     for _, child in pairs(head:GetChildren()) do
-        if child:IsA("Decal") or child:IsA("Texture") then child.Transparency = 1 end
+        if child:IsA("Decal") or child:IsA("Texture") then
+            child.Transparency = 1
+        end
     end
 end
 
--- ===========================================================
---  PANIC GROUND (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  PANIC GROUND SYSTEM
+-- ==========================================================
 local function performPanicGround()
     if not Surge['Panic Ground']['Enabled'] then return end
+    
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
+    
     local params = RaycastParams.new()
     params.FilterDescendantsInstances = {char, Workspace.CurrentCamera}
     params.FilterType = Enum.RaycastFilterType.Blacklist
+    
     local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -5000, 0), params)
     if result then
         hrp.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0))
+        print("[Panic Ground] Teleported to ground")
     end
 end
 
--- ===========================================================
---  PLAYER MODS
--- ===========================================================
-local function applyPlayerMods()
-    if panicActive then return end
-    local pm = Surge['Player Modification']
-    local c = LocalPlayer.Character
-    local hum = c and c:FindFirstChild("Humanoid")
-    if not hum or not pm['Movement']['Enabled'] then return end
-    if pm['Movement']['Speed Modifications']['Enabled'] then
-        hum.WalkSpeed = pm['Movement']['Speed Modifications']['Value']
-    end
-    if pm['Movement']['Jump Modifications']['Enabled'] then
-        hum.JumpPower = pm['Movement']['Jump Modifications']['Value']
-    end
-end
-
-RunService.Heartbeat:Connect(applyPlayerMods)
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    applyPlayerMods()
-    applyHeadless()
-    applyKorblox()
-    antiTripAttempts = 0
-end)
-
--- ===========================================================
---  KEYBINDS
--- ===========================================================
+-- ==========================================================
+--  KEYBIND HANDLER
+-- ==========================================================
 local Keybinds = Surge['Main']['Keybinds']
 
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
-
+    
+    local now = tick()
+    
     -- ESP Toggle
     local espKey = getKeyCodeFromString(Keybinds['ESP Toggle'] or 'T')
     if espKey and input.KeyCode == espKey then
         ESPEnabled = not ESPEnabled
-        notify("ESP: " .. (ESPEnabled and "ON" or "OFF"))
+        print("ESP:", ESPEnabled and "ON" or "OFF")
         if not ESPEnabled then
             for _, drawings in pairs(ESPCache) do
                 for _, dr in pairs(drawings) do dr.Visible = false end
@@ -647,88 +603,109 @@ UserInputService.InputBegan:Connect(function(input, processed)
         end
         return
     end
-
+    
     -- Lock Target
     local lockKey = getKeyCodeFromString(Keybinds['Lock Target'] or 'Z')
     if lockKey and input.KeyCode == lockKey then
         if LockedTarget then
             LockedTarget = nil
-            notify("Target unlocked")
+            print("Lock cleared")
         else
             local cursorTarget = getTargetFromCursor()
             if cursorTarget then
                 LockedTarget = cursorTarget
-                watchLockedTarget(cursorTarget)
-                notify("Locked: " .. cursorTarget.Name)
+                print("Locked:", cursorTarget.Name)
             end
         end
         return
     end
-
-    -- Triggerbot
+    
+    -- Triggerbot Activate
     local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
         if not Surge['Triggerbot']['Enabled'] then return end
+        
+        if now - LastToggleTime < 0.3 then return end
+        LastToggleTime = now
+        
         local mode = Surge['Triggerbot']['Mode'] or 'Hold'
+        
         if mode == 'Toggle' then
             TriggerbotActive = not TriggerbotActive
-            notify("Triggerbot: " .. (TriggerbotActive and "ON" or "OFF"))
-            if TriggerbotActive then startTBLoop() end
+            print("Triggerbot:", TriggerbotActive and "ON" or "OFF")
         else
             TriggerbotActive = true
-            startTBLoop()
-            notify("Triggerbot: HOLD")
+            print("Triggerbot: HOLD")
+        end
+        
+        if Surge['Player Modification']['Rapid Fire']['Enabled'] then
+            RapidFireActive = TriggerbotActive
         end
         return
     end
-
-    -- Spiderman
+    
+    -- Spiderman Wall Jump
     if input.KeyCode == Enum.KeyCode.Space then
-        local now = tick()
-        if now - LastJumpTime < 0.4 then
+        local jumpNow = tick()
+        if jumpNow - LastJumpTime < 0.4 then
             JumpCount = JumpCount + 1
         else
             JumpCount = 1
         end
-        LastJumpTime = now
+        LastJumpTime = jumpNow
+        
         if JumpCount >= 2 or not Surge.Spiderman['Require Double Jump'] then
             performWallJump()
         end
         return
     end
-
+    
     -- Panic Ground
-    local pgKey = getKeyCodeFromString(Keybinds['Panic Ground'] or 'X')
-    if pgKey and input.KeyCode == pgKey then
+    local panicGroundKey = getKeyCodeFromString(Keybinds['Panic Ground'] or 'X')
+    if panicGroundKey and input.KeyCode == panicGroundKey then
         performPanicGround()
         return
     end
-
-    -- Panic (real toggle now)
+    
+    -- Panic Key
     local panicKey = getKeyCodeFromString(Keybinds['Panic'] or 'L')
     if panicKey and input.KeyCode == panicKey then
-        setPanic(not panicActive)
-        return
+        if Surge['Main']['Panic']['Enabled'] then
+            ESPEnabled = false
+            LockedTarget = nil
+            CurrentTarget = nil
+            TriggerbotActive = false
+            RapidFireActive = false
+            
+            for _, drawings in pairs(ESPCache) do
+                for _, dr in pairs(drawings) do dr.Visible = false end
+            end
+            print("!!! PANIC !!!")
+        end
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input, processed)
     if processed then return end
+    
     local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
-        if Surge['Triggerbot']['Mode'] == 'Hold' then
+        if Surge['Triggerbot']['Enabled'] and Surge['Triggerbot']['Mode'] == 'Hold' then
             TriggerbotActive = false
-            notify("Triggerbot: OFF")
+            RapidFireActive = false
+            print("Triggerbot: OFF")
         end
     end
 end)
 
--- ===========================================================
---  MAIN LOOP (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  MAIN LOOP
+-- ==========================================================
 RunService.RenderStepped:Connect(function()
     CurrentTarget = getBestTarget()
     UpdateESP()
+    performTriggerbot()
+    
     applyHeadless()
     applyKorblox()
     performAntiTrip()
@@ -741,12 +718,14 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 for _, player in pairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer then CreateESP(player) end
+    if player ~= LocalPlayer then
+        CreateESP(player)
+    end
 end
 
--- ===========================================================
---  SILENT AIM (original hook - untouched)
--- ===========================================================
+-- ==========================================================
+--  SILENT AIM
+-- ==========================================================
 local mouse = LocalPlayer:GetMouse()
 local mt = getrawmetatable(mouse)
 setreadonly(mt, false)
@@ -754,14 +733,16 @@ local old = mt.__index
 
 mt.__index = newcclosure(function(self, key)
     if key:lower() == "hit" or key:lower() == "target" then
-        if Surge["Silent Aimbot"]["Enabled"] and not panicActive and CurrentTarget then
+        if Surge["Silent Aimbot"]["Enabled"] and CurrentTarget then
             local tgt = CurrentTarget
             if tgt and tgt.Character then
                 local char = tgt.Character
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 local head = char:FindFirstChild("Head")
+                
                 local hitPartStr = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"] or "Closest Point"
                 local targetPart = nil
+                
                 if hitPartStr == "Head" and head then
                     targetPart = head
                 elseif hitPartStr == "HumanoidRootPart" and hrp then
@@ -776,14 +757,17 @@ mt.__index = newcclosure(function(self, key)
                         targetPart = head or hrp
                     end
                 end
+                
                 if targetPart then
-                    local vel = targetPart.AssemblyLinearVelocity or Vector3.new(0,0,0)
+                    local vel = targetPart.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
                     local p = Surge["Silent Aimbot"]["Prediction"]
                     local offset = Vector3.new(vel.X * (p.X or 0), vel.Y * (p.Y or 0), vel.Z * (p.Z or 0))
+                    
                     if Surge["Silent Aimbot"]["Prediction"]["Power"]["Enabled"] then
                         local power = Surge["Silent Aimbot"]["Prediction"]["Power"]["Prediction Power"] or 1.042
                         offset = offset * power
                     end
+                    
                     if key:lower() == "hit" then
                         return CFrame.new(targetPart.Position + offset)
                     else
@@ -798,19 +782,13 @@ end)
 
 setreadonly(mt, true)
 
-if LocalPlayer.Character then
-    task.delay(0.5, function()
-        applyHeadless()
-        applyKorblox()
-    end)
-end
-
-print("Brightside V5 Loaded!")
+print("Brightside V4 Loaded Successfully!")
 print("Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
+print("Features: Fast Triggerbot, Cursor Targeting, Safe Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
 
--- ===========================================================
---  LOAD EXTERNAL SCRIPT (original - untouched)
--- ===========================================================
+-- ==========================================================
+--  LOAD EXTERNAL SCRIPT
+-- ==========================================================
 task.spawn(function()
     local success, err = pcall(function()
         local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D")
@@ -819,6 +797,7 @@ task.spawn(function()
             print("External features loaded successfully")
         end
     end)
+    
     if not success then
         warn("Failed to load external features:", err)
         print("Running with core features only")
