@@ -625,16 +625,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
-    -- Triggerbot Activate
-    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
+    -- Triggerbot Activate (Universal key - V by default)
+    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
     if trigKey and input.KeyCode == trigKey then
         if not Surge['Triggerbot']['Enabled'] then return end
         
-        if now - LastToggleTime < 0.3 then return end
-        LastToggleTime = now
-        
         local mode = Surge['Triggerbot']['Mode'] or 'Hold'
-        
         if mode == 'Toggle' then
             TriggerbotActive = not TriggerbotActive
             print("Triggerbot:", TriggerbotActive and "ON" or "OFF")
@@ -643,8 +639,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
             print("Triggerbot: HOLD")
         end
         
+        -- Also activate rapid fire if enabled
         if Surge['Player Modification']['Rapid Fire']['Enabled'] then
-            RapidFireActive = TriggerbotActive
+            RapidFireActive = true
         end
         return
     end
