@@ -4,7 +4,7 @@
 
 -- ==========================================================
 --  BRIGHTSIDE V4 - CRITICAL BUG FIXES APPLIED
---  Fixed: Target death detection (ESP stops on death), nil value error 267
+--  Fixed: Error 267 (Camera nil), Target death detection (ESP stops on death)
 --  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
 -- ==========================================================
 
@@ -14,9 +14,8 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
--- Cache player references
+-- Cache player references INITIAL (will update camera dynamically)
 local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
 -- ==========================================================
@@ -51,7 +50,7 @@ local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 -- Cached character references (updated periodically)
 local localChar, localHum, localHRP = nil, nil, nil
 local lastCharUpdate = 0
-local CHAR_UPDATE_INTERVAL = 0.1 -- Update cached character every 100ms
+local CHAR_UPDATE_INTERVAL = 0.1
 
 -- Cached config values
 local fovCache = Surge.SilentAimbot.FOV['Circle Value'] or 150
@@ -121,7 +120,7 @@ buildActionCache()
 -- ==========================================================
 local playerCache = {}
 local lastPlayerCacheUpdate = 0
-local PLAYER_CACHE_TTL = 0.5 -- Cache players for 500ms
+local PLAYER_CACHE_TTL = 0.5
 
 local function getCachedPlayers()
     local now = tick()
@@ -149,6 +148,17 @@ local function updateCachedChar()
         lastCharUpdate = now
     end
     return localChar, localHum, localHRP
+end
+
+-- ==========================================================
+--  CRITICAL: Safe Camera Getter (Fixes Error 267)
+-- ==========================================================
+local function getCamera()
+    local cam = Workspace.CurrentCamera
+    if cam and cam:IsA("Camera") then
+        return cam
+    end
+    return nil
 end
 
 -- ==========================================================
@@ -209,9 +219,12 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- ==========================================================
---  MOUSE CURSOR TARGETING (Optimized)
+--  MOUSE CURSOR TARGETING (Optimized) - FIXED Camera check
 -- ==========================================================
 local function getTargetFromCursor()
+    local cam = getCamera()
+    if not cam then return nil, math.huge end
+    
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local closestPlayer = nil
     local closestDist = math.huge
@@ -226,9 +239,8 @@ local function getTargetFromCursor()
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     local hum = char:FindFirstChildOfClass("Humanoid")
-                    -- CRITICAL FIX: Check if humanoid exists AND health > 0
                     if hum and hum.Health > 0 then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                        local screenPos, onScreen = cam:WorldToViewportPoint(hrp.Position)
                         if onScreen and screenPos.Z > 0 then
                             local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                             if dist < closestDist and dist <= fovCache then
@@ -249,20 +261,19 @@ end
 --  VISIBILITY CHECK (Optimized & Fixed)
 -- ==========================================================
 local function isVisible(target)
-    -- Fixed: Use correct property name (VisibleCheck not Visible Check)
     if not Surge.Target.VisibleCheck then return true end
     if not target or not target.Character then return false end
     
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     
+    local cam = getCamera()
+    if not cam then return false end
+    
     local char, _, _ = updateCachedChar()
     if not char then return false end
     
-    -- CRITICAL FIX: Camera nil check (prevents error 267)
-    if not Camera then return false end
-    
-    local origin = Camera.CFrame.Position
+    local origin = cam.CFrame.Position
     local direction = (hrp.Position - origin)
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {char}
@@ -291,12 +302,10 @@ local function shouldUnlockTarget(target)
         return true 
     end
     
-    -- FIXED: Check if dead (health <= 0)
     if Surge.Target.Unlock.Knocked and hum.Health <= 0 then
         return true
     end
     
-    -- Check if grabbed/constrained
     if Surge.Target.Unlock.Grabbed then
         if char:FindFirstChild("GRABBING_CONSTRAINT") then
             return true
@@ -318,12 +327,10 @@ local function getBestTarget()
     -- TARGET MODE: Only locked target
     if targetType == "Target" then
         if LockedTarget then
-            -- FIXED: Check if should unlock (dead/grabbed)
             if shouldUnlockTarget(LockedTarget) then
                 LockedTarget = nil
                 return nil
             end
-            -- Check visibility if required
             if Surge.Target.VisibleCheck then
                 if isVisible(LockedTarget) then
                     return LockedTarget
@@ -336,13 +343,18 @@ local function getBestTarget()
     end
     
     -- AUTOMATIC MODE
-    -- First check locked target if valid
     if LockedTarget and not shouldUnlockTarget(LockedTarget) then
         local char = LockedTarget.Character
         if char then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                local screenPos = Camera:WorldToViewportPoint(hrp.Position)
+                local cam = getCamera()
+                if not cam then 
+                    LockedTarget = nil
+                    return nil 
+                end
+                
+                local screenPos = cam:WorldToViewportPoint(hrp.Position)
                 if screenPos.Z > 0 then
                     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
                     local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
@@ -354,11 +366,10 @@ local function getBestTarget()
                 end
             end
         end
-        -- Locked target invalid, clear it
         LockedTarget = nil
     end
     
-    -- Cursor targeting (find best player under cursor)
+    -- Cursor targeting
     local cursorTarget = getTargetFromCursor()
     if cursorTarget then
         return cursorTarget
@@ -418,8 +429,8 @@ local function UpdateESP()
         return
     end
     
-    -- CRITICAL FIX: Camera nil check (prevents error 267)
-    if not Camera then return end
+    local cam = getCamera()
+    if not cam then return end
     
     local char, _, localHRP = updateCachedChar()
     local players = getCachedPlayers()
@@ -429,7 +440,6 @@ local function UpdateESP()
         if player ~= LocalPlayer then
             local pChar = player.Character
             
-            -- FIXED: Remove ESP if no character or dead
             if not pChar then
                 RemoveESP(player)
                 goto continue
@@ -438,21 +448,18 @@ local function UpdateESP()
             local hrp = pChar:FindFirstChild("HumanoidRootPart")
             local hum = pChar:FindFirstChildOfClass("Humanoid")
             
-            -- FIXED: Remove ESP if humanoid missing or dead
             if not hrp or not hum or hum.Health <= 0 then 
                 RemoveESP(player)
                 goto continue
             end
             
-            -- Distance check
             if localHRP and (hrp.Position - localHRP.Position).Magnitude > maxDistCache then 
                 RemoveESP(player)
                 goto continue
             end
             
-            -- Screen position check
             local feetPos = hrp.Position - Vector3.new(0, 3, 0)
-            local screenPos = Camera:WorldToViewportPoint(feetPos)
+            local screenPos = cam:WorldToViewportPoint(feetPos)
             
             if screenPos.Z <= 0 then
                 local drawings = ESPCache[player]
@@ -466,7 +473,6 @@ local function UpdateESP()
                 goto continue
             end
             
-            -- Create/Update ESP
             local drawings = CreateESP(player)
             if not drawings then goto continue end
             
@@ -476,7 +482,7 @@ local function UpdateESP()
             -- BOX
             if boxEnabledCache then
                 local headPos = hrp.Position + Vector3.new(0, 6, 0)
-                local headScreen = Camera:WorldToViewportPoint(headPos)
+                local headScreen = cam:WorldToViewportPoint(headPos)
                 if headScreen.Z > 0 then
                     local headSp = Vector2.new(headScreen.X, headScreen.Y)
                     local h = math.abs(sp.Y - headSp.Y)
@@ -518,7 +524,7 @@ local function UpdateESP()
             -- TRACER
             if tracerEnabledCache then
                 if drawings.Tracer and drawings.Tracer.Visible ~= nil then
-                    drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
+                    drawings.Tracer.From = Vector2.new(sp.X, cam.ViewportSize.Y)
                     drawings.Tracer.To = sp
                     drawings.Tracer.Color = isTarget and targetColorCache or tracerOtherColorCache
                     drawings.Tracer.Visible = true
@@ -546,10 +552,13 @@ local function UpdateESP()
 end
 
 -- ==========================================================
---  TRIGGERBOT (Fixed checks)
+--  TRIGGERBOT (Fixed checks) - Added camera check
 -- ==========================================================
 local function performTriggerbot()
     if not TriggerbotActive or not Surge.Triggerbot.Enabled then return end
+    
+    local cam = getCamera()
+    if not cam then return end
     
     local target = nil
     if Surge.Triggerbot.Type == "Target" then
@@ -565,14 +574,10 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     local hum = target.Character:FindFirstChildOfClass("Humanoid")
     
-    -- FIXED: Check if target is dead
     if not hrp or not hum or hum.Health <= 0 then return end
     
-    -- CRITICAL FIX: Camera nil check
-    if not Camera then return end
-    
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local pos = Camera:WorldToViewportPoint(hrp.Position)
+    local pos = cam:WorldToViewportPoint(hrp.Position)
     if pos.Z <= 0 then return end
     
     local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
@@ -608,12 +613,10 @@ local function performAntiTrip()
     -- Detect trip conditions
     local isTripped = false
     
-    -- 1. PlatformStand (primary indicator)
     if hum.PlatformStand then
         isTripped = true
     end
     
-    -- 2. Humanoid states
     local state = hum:GetState()
     if state == Enum.HumanoidStateType.FallingDown or 
        state == Enum.HumanoidStateType.Ragdoll or
@@ -621,7 +624,6 @@ local function performAntiTrip()
         isTripped = true
     end
     
-    -- 3. Velocity check (falling fast)
     local vel = hrp.AssemblyLinearVelocity
     if vel.Y < -50 and vel.Magnitude > 60 then
         isTripped = true
@@ -629,15 +631,12 @@ local function performAntiTrip()
     
     if not isTripped then return end
     
-    -- FIXED ANTI-TRIP: Multi-method recovery
+    -- FIXED ANTI-TRIP: Multi-method recovery with error handling
     local success = pcall(function()
-        -- Clear platform stand
         hum.PlatformStand = false
         
-        -- Force standing state
         hum:ChangeState(Enum.HumanoidStateType.Running)
         
-        -- Velocity correction (gentler)
         if vel.Magnitude > 30 then
             local newVel = Vector3.new(
                 vel.X * 0.3,
@@ -647,14 +646,12 @@ local function performAntiTrip()
             hrp.AssemblyLinearVelocity = newVel
         end
         
-        -- Upward nudge if falling
         if vel.Y < -15 then
             hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + Vector3.new(0, 10, 0)
         end
     end)
     
     if not success then
-        -- Fallback
         pcall(function()
             hum.PlatformStand = false
         end)
@@ -875,10 +872,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
             TriggerbotActive = true
         end
         
-        if Surge.PlayerModification.RapidFire.Enabled then
-            -- Rapid fire handled separately
-        end
-        
     elseif input.KeyCode == Enum.KeyCode.Space then
         local jumpNow = tick()
         if jumpNow - LastJumpTime < 0.4 then
@@ -929,13 +922,14 @@ UserInputService.InputEnded:Connect(function(input, processed)
 end)
 
 -- ==========================================================
---  MAIN LOOP (Optimized)
+--  MAIN LOOP (Optimized with camera safety)
 -- ==========================================================
 RunService.RenderStepped:Connect(function()
-    -- CRITICAL FIX: Update camera reference every frame (camera can be destroyed/recreated)
-    Camera = Workspace.CurrentCamera
+    -- CRITICAL: Get fresh camera every frame (prevents nil camera errors)
+    local cam = getCamera()
+    if not cam then return end
     
-    -- Update cached character (every frame but cached internally)
+    -- Update cached character
     updateCachedChar()
     
     -- 1. Target acquisition
