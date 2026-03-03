@@ -1,6 +1,10 @@
+-- Name: Brightside V4 - Fixed Anti Trip
+-- Location of script: StarterPlayerScripts (as LocalScript)
+-- Script Type: LocalScript
+
 -- ==========================================================
---  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP)
---  Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
+--  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP FIXED)
+--  Fixed: Safe Anti Trip (Now Working), Fast Triggerbot, Mouse Cursor Targeting
 --  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
 --  Games: Da Hood (2788229376), Hood Customs (9825515356)
 -- ==========================================================
@@ -411,17 +415,10 @@ local function performTriggerbot()
 end
 
 -- ==========================================================
---  ANTI TRIP SYSTEM (SAFE - UNDETECTED)
+--  ANTI TRIP SYSTEM (SAFE - FIXED VERSION)
 -- ==========================================================
-local lastAntiTripTime = 0
-local antiTripAttempts = 0
-
 local function performAntiTrip()
     if not Surge['Anti Trip']['Enabled'] then return end
-    
-    local now = tick()
-    if now - lastAntiTripTime < 0.1 then return end -- 0.1s interval (slower = safer)
-    lastAntiTripTime = now
     
     local char = LocalPlayer.Character
     if not char then return end
@@ -430,29 +427,63 @@ local function performAntiTrip()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then return end
     
-    -- Only check if actually tripped (PlatformStand is main indicator)
-    if not hum.PlatformStand then return end
+    -- Only apply if player is alive and actually tripped
+    if hum.Health <= 0 then return end
     
-    -- Limit attempts to prevent detection
-    antiTripAttempts = antiTripAttempts + 1
-    if antiTripAttempts > 5 then
-        -- Too many attempts, probably being forced by server
-        return
+    -- Check multiple indicators of being tripped
+    local isTripped = false
+    
+    -- Primary indicator: PlatformStand (most reliable)
+    if hum.PlatformStand then
+        isTripped = true
     end
     
-    -- SAFE: Just disable PlatformStand (no BodyGyro, no rapid state changes)
+    -- Secondary indicator: Certain humanoid states
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.FallingDown or 
+       state == Enum.HumanoidStateType.Ragdoll or
+       state == Enum.HumanStateType.Seated then
+        isTripped = true
+    end
+    
+    -- Tertiary indicator: High downward velocity (falling hard)
+    local vel = hrp.AssemblyLinearVelocity
+    if vel.Y < -50 and vel.Magnitude > 60 then
+        isTripped = true
+    end
+    
+    if not isTripped then return end
+    
+    -- FIXED ANTI-TRIP LOGIC:
+    -- 1. Immediately reset PlatformStand
     hum.PlatformStand = false
     
-    -- Optional: subtle velocity cap (not instant stop)
-    local vel = hrp.AssemblyLinearVelocity
-    if vel.Magnitude > 50 then
-        hrp.AssemblyLinearVelocity = vel.Unit * 50
+    -- 2. Force humanoid state to standing
+    pcall(function()
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end)
+    
+    -- 3. Apply counter-force to velocity (gentler approach)
+    local currentVel = hrp.AssemblyLinearVelocity
+    if currentVel.Magnitude > 30 then
+        -- Gradually reduce velocity instead of instant zero (less detectable)
+        local newVel = Vector3.new(
+            currentVel.X * 0.3,
+            math.max(currentVel.Y, 0), -- Don't kill upward velocity
+            currentVel.Z * 0.3
+        )
+        hrp.AssemblyLinearVelocity = newVel
     end
     
-    -- Reset attempts after 2 seconds of being stable
-    task.delay(2, function()
-        if hum and not hum.PlatformStand then
-            antiTripAttempts = 0
+    -- 4. Apply subtle upward nudge to help recover
+    if vel.Y < -20 then
+        hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + Vector3.new(0, 15, 0)
+    end
+    
+    -- 5. Ensure we're not in a disabled state
+    pcall(function()
+        if hum.PlatformStand then
+            hum.PlatformStand = false
         end
     end)
 end
@@ -707,10 +738,9 @@ RunService.RenderStepped:Connect(function()
     CurrentTarget = getBestTarget()
     UpdateESP()
     performTriggerbot()
-    
+    performAntiTrip()  -- Fixed anti trip runs every frame
     applyHeadless()
     applyKorblox()
-    performAntiTrip()
 end)
 
 Players.PlayerRemoving:Connect(function(player)
@@ -786,7 +816,7 @@ setreadonly(mt, true)
 
 print("Brightside V4 Loaded Successfully!")
 print("Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
-print("Features: Fast Triggerbot, Cursor Targeting, Safe Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
+print("Features: Fast Triggerbot, Cursor Targeting, Fixed Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
 
 -- ==========================================================
 --  LOAD EXTERNAL SCRIPT
