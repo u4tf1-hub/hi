@@ -1,9 +1,7 @@
--- ==========================================================
---  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP)
---  Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
---  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
---  Games: Da Hood (2788229376), Hood Customs (9825515356)
--- ==========================================================
+-- Brightside V4 - FINAL SOURCE (SAFE ANTI TRIP)
+-- Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
+-- Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
+-- Games: Da Hood (2788229376), Hood Customs (9825515356)
 
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -787,7 +785,7 @@ print("Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
 print("Features: Fast Triggerbot, Cursor Targeting, Safe Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
 
 -- ==========================================================
---  LOAD EXTERNAL SCRIPT
+--  LOAD EXTERNAL SCRIPT (Speed, Aim Assist, etc)
 -- ==========================================================
 task.spawn(function()
     local success, err = pcall(function()
