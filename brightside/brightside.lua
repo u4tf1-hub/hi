@@ -33,8 +33,6 @@ local RapidFireLastFire = 0
 -- EXTRA STATE
 local LastJumpTime, LastWallJumpTime, JumpCount = 0, 0, 0
 local LastToggleTime = 0
-local lastAntiTripTime = 0
-local lastStableTime = 0
 
 -- ==========================================================
 --  GAME DETECTION
@@ -109,14 +107,12 @@ local function getKeyCodeFromString(keyName)
 end
 
 -- ==========================================================
---  MOUSE CURSOR TARGETING (Optimized)
+--  MOUSE CURSOR TARGETING
 -- ==========================================================
 local function getTargetFromCursor()
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local closestPlayer = nil
     local closestDist = math.huge
-    local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
-    fov = fov * fov -- Compare squared distances for performance
     
     for _, player in pairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
@@ -133,16 +129,21 @@ local function getTargetFromCursor()
         local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
         if not onScreen or screenPos.Z <= 0 then continue end
         
-        local diff = Vector2.new(screenPos.X, screenPos.Y) - mousePos
-        local distSq = diff.X * diff.X + diff.Y * diff.Y
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
         
-        if distSq < closestDist and distSq <= fov then
-            closestDist = distSq
+        local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
+        
+        if dist < closestDist and dist <= fov then
+            closestDist = dist
             closestPlayer = player
         end
     end
     
-    return closestPlayer, math.sqrt(closestDist)
+    return closestPlayer, closestDist
+end
+
+local function playerFromMouse()
+    return getTargetFromCursor()
 end
 
 local function isVisible(target)
@@ -184,7 +185,7 @@ local function shouldUnlockTarget(target)
 end
 
 -- ==========================================================
---  TARGET SYSTEM (Optimized)
+--  TARGET SYSTEM
 -- ==========================================================
 local function getBestTarget()
     local targetType = Surge['Target']['Type'] or "Automatic"
@@ -210,10 +211,9 @@ local function getBestTarget()
                 local screenPos = Camera:WorldToViewportPoint(hrp.Position)
                 if screenPos.Z > 0 then
                     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-                    local diff = Vector2.new(screenPos.X, screenPos.Y) - mousePos
-                    local distSq = diff.X * diff.X + diff.Y * diff.Y
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                     local fov = Surge['Silent Aimbot']['FOV']['Circle Value'] or 150
-                    if distSq <= fov * fov and isVisible(LockedTarget) then
+                    if dist <= fov and isVisible(LockedTarget) then
                         return LockedTarget
                     end
                 end
@@ -222,7 +222,12 @@ local function getBestTarget()
         LockedTarget = nil
     end
     
-    return getTargetFromCursor()
+    local cursorTarget = getTargetFromCursor()
+    if cursorTarget and isVisible(cursorTarget) then
+        return cursorTarget
+    end
+    
+    return nil
 end
 
 -- ==========================================================
@@ -364,13 +369,11 @@ local function performTriggerbot()
     
     local target = nil
     
-    -- If Target mode, only shoot locked target
     if Surge['Target']['Type'] == "Target" then
         if LockedTarget and not shouldUnlockTarget(LockedTarget) then
             target = LockedTarget
         end
     else
-        -- Automatic mode: shoot current target
         target = CurrentTarget
     end
     
@@ -379,23 +382,20 @@ local function performTriggerbot()
     local hrp = target.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Check if in crosshair/FOV
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
     
     if pos.Z <= 0 then return end
     
     local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 15 or (Surge['Triggerbot']['FOV']['Circle Value'] or 45)
+    local threshold = Surge['Triggerbot']['Shoot Mode'] == 'Hitbox' and 25 or (Surge['Triggerbot']['FOV']['Circle Value'] or 60)
     
     if dist > threshold then return end
     
-    -- Cooldown check
     local cooldown = Surge['Triggerbot']['Timing']['Cooldown'] or 0.001
     local now = tick()
     if now - LastShot < cooldown then return end
     
-    -- Shoot
     local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
     if tool then
         pcall(function()
@@ -415,7 +415,7 @@ local function performAntiTrip()
     if not Surge['Anti Trip']['Enabled'] then return end
     
     local now = tick()
-    if now - lastAntiTripTime < 0.05 then return end -- Faster response (50ms)
+    if now - lastAntiTripTime < 0.1 then return end -- 0.1s interval (slower = safer)
     lastAntiTripTime = now
     
     local char = LocalPlayer.Character
@@ -425,26 +425,31 @@ local function performAntiTrip()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hum or not hrp then return end
     
-    -- Check if tripped (PlatformStand is primary indicator)
-    if not hum.PlatformStand then 
-        lastStableTime = now -- Track when last stable
-        return 
+    -- Only check if actually tripped (PlatformStand is main indicator)
+    if not hum.PlatformStand then return end
+    
+    -- Limit attempts to prevent detection
+    antiTripAttempts = antiTripAttempts + 1
+    if antiTripAttempts > 5 then
+        -- Too many attempts, probably being forced by server
+        return
     end
     
-    -- If recently stable, give server time (prevents rapid toggling)
-    if now - lastStableTime < 0.5 then return end
+    -- SAFE: Just disable PlatformStand (no BodyGyro, no rapid state changes)
+    hum.PlatformStand = false
     
-    -- SAFE: Only disable PlatformStand
-    pcall(function()
-        hum.PlatformStand = false
-    end)
-    
-    -- Optional: Subtle velocity control (prevents immediate fall)
+    -- Optional: subtle velocity cap (not instant stop)
     local vel = hrp.AssemblyLinearVelocity
-    if vel.Magnitude > 30 then
-        hrp.AssemblyLinearVelocity = vel.Unit * 30
+    if vel.Magnitude > 50 then
+        hrp.AssemblyLinearVelocity = vel.Unit * 50
     end
-end
+    
+    -- Reset attempts after 2 seconds of being stable
+    task.delay(2, function()
+        if hum and not hum.PlatformStand then
+            antiTripAttempts = 0
+        end
+    end)
 end
 
 -- ==========================================================
@@ -615,12 +620,16 @@ UserInputService.InputBegan:Connect(function(input, processed)
         return
     end
     
-    -- Triggerbot Activate (Universal key - V by default)
-    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'V')
+    -- Triggerbot Activate
+    local trigKey = getKeyCodeFromString(Keybinds['Trigger Bot Activate'] or 'C')
     if trigKey and input.KeyCode == trigKey then
         if not Surge['Triggerbot']['Enabled'] then return end
         
+        if now - LastToggleTime < 0.3 then return end
+        LastToggleTime = now
+        
         local mode = Surge['Triggerbot']['Mode'] or 'Hold'
+        
         if mode == 'Toggle' then
             TriggerbotActive = not TriggerbotActive
             print("Triggerbot:", TriggerbotActive and "ON" or "OFF")
@@ -629,9 +638,8 @@ UserInputService.InputBegan:Connect(function(input, processed)
             print("Triggerbot: HOLD")
         end
         
-        -- Also activate rapid fire if enabled
         if Surge['Player Modification']['Rapid Fire']['Enabled'] then
-            RapidFireActive = true
+            RapidFireActive = TriggerbotActive
         end
         return
     end
