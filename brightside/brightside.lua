@@ -1,14 +1,14 @@
--- Name: Brightside V4 - Fixed Target Checks & Anti Trip
+-- Name: Brightside V4 - Fixed Target Checks & Anti Trip (CRITICAL FIX)
 -- Location of script: StarterPlayerScripts (as LocalScript)
 -- Script Type: LocalScript
 
 -- ==========================================================
---  BRIGHTSIDE V4 - PERFORMANCE OPTIMIZED WITH WORKING CHECKS
---  Fixed: Target death detection, ESP cleanup, Visibility checks
+--  BRIGHTSIDE V4 - CRITICAL BUG FIXES APPLIED
+--  Fixed: Target death detection (ESP stops on death), nil value error 267
 --  Features: Spiderman, Korblox, Headless, Panic Ground, Rapid Fire
 -- ==========================================================
 
---PERFORMANCE: Cache ALL services
+-- PERFORMANCE: Cache ALL services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -20,7 +20,7 @@ local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
 -- ==========================================================
---  CONFIG (with fallbacks)
+--  CONFIG (with comprehensive fallbacks)
 -- ==========================================================
 local Surge = getgenv().Surge or {}
 Surge.Main = Surge.Main or {}
@@ -259,6 +259,9 @@ local function isVisible(target)
     local char, _, _ = updateCachedChar()
     if not char then return false end
     
+    -- CRITICAL FIX: Camera nil check (prevents error 267)
+    if not Camera then return false end
+    
     local origin = Camera.CFrame.Position
     local direction = (hrp.Position - origin)
     local raycastParams = RaycastParams.new()
@@ -393,7 +396,9 @@ local function RemoveESP(player)
     if drawings then
         for _, dr in pairs(drawings) do
             if dr and dr.Remove then
-                dr:Remove()
+                pcall(function()
+                    dr:Remove()
+                end)
             end
         end
         ESPCache[player] = nil
@@ -405,11 +410,16 @@ local function UpdateESP()
     if not ESPEnabled then
         for _, drawings in pairs(ESPCache) do
             for _, dr in pairs(drawings) do
-                dr.Visible = false
+                if dr and dr.Visible ~= nil then
+                    dr.Visible = false
+                end
             end
         end
         return
     end
+    
+    -- CRITICAL FIX: Camera nil check (prevents error 267)
+    if not Camera then return end
     
     local char, _, localHRP = updateCachedChar()
     local players = getCachedPlayers()
@@ -448,7 +458,9 @@ local function UpdateESP()
                 local drawings = ESPCache[player]
                 if drawings then 
                     for _, dr in pairs(drawings) do 
-                        dr.Visible = false 
+                        if dr and dr.Visible ~= nil then
+                            dr.Visible = false 
+                        end
                     end 
                 end
                 goto continue
@@ -471,51 +483,61 @@ local function UpdateESP()
                     local w = h * 0.5
                     local boxPos = Vector2.new(sp.X - w/2, headSp.Y)
                     
-                    drawings.BoxOutline.Size = Vector2.new(w + 4, h + 4)
-                    drawings.BoxOutline.Position = Vector2.new(boxPos.X - 2, boxPos.Y - 2)
-                    drawings.BoxOutline.Visible = true
-                    drawings.Box.Size = Vector2.new(w, h)
-                    drawings.Box.Position = boxPos
-                    drawings.Box.Color = isTarget and targetColorCache or boxOtherColorCache
-                    drawings.Box.Visible = true
+                    if drawings.BoxOutline and drawings.BoxOutline.Visible ~= nil then
+                        drawings.BoxOutline.Size = Vector2.new(w + 4, h + 4)
+                        drawings.BoxOutline.Position = Vector2.new(boxPos.X - 2, boxPos.Y - 2)
+                        drawings.BoxOutline.Visible = true
+                    end
+                    if drawings.Box and drawings.Box.Visible ~= nil then
+                        drawings.Box.Size = Vector2.new(w, h)
+                        drawings.Box.Position = boxPos
+                        drawings.Box.Color = isTarget and targetColorCache or boxOtherColorCache
+                        drawings.Box.Visible = true
+                    end
                 else
-                    drawings.BoxOutline.Visible = false
-                    drawings.Box.Visible = false
+                    if drawings.BoxOutline then drawings.BoxOutline.Visible = false end
+                    if drawings.Box then drawings.Box.Visible = false end
                 end
             else
-                drawings.BoxOutline.Visible = false
-                drawings.Box.Visible = false
+                if drawings.BoxOutline then drawings.BoxOutline.Visible = false end
+                if drawings.Box then drawings.Box.Visible = false end
             end
             
             -- NAME
             if nameEnabledCache then
-                drawings.Name.Text = nameTypeCache == 'Display' and player.DisplayName or player.Name
-                drawings.Name.Position = Vector2.new(sp.X, sp.Y + 10)
-                drawings.Name.Color = isTarget and targetColorCache or nameOtherColorCache
-                drawings.Name.Visible = true
+                if drawings.Name and drawings.Name.Visible ~= nil then
+                    drawings.Name.Text = nameTypeCache == 'Display' and player.DisplayName or player.Name
+                    drawings.Name.Position = Vector2.new(sp.X, sp.Y + 10)
+                    drawings.Name.Color = isTarget and targetColorCache or nameOtherColorCache
+                    drawings.Name.Visible = true
+                end
             else
-                drawings.Name.Visible = false
+                if drawings.Name then drawings.Name.Visible = false end
             end
             
             -- TRACER
             if tracerEnabledCache then
-                drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
-                drawings.Tracer.To = sp
-                drawings.Tracer.Color = isTarget and targetColorCache or tracerOtherColorCache
-                drawings.Tracer.Visible = true
+                if drawings.Tracer and drawings.Tracer.Visible ~= nil then
+                    drawings.Tracer.From = Vector2.new(sp.X, Camera.ViewportSize.Y)
+                    drawings.Tracer.To = sp
+                    drawings.Tracer.Color = isTarget and targetColorCache or tracerOtherColorCache
+                    drawings.Tracer.Visible = true
+                end
             else
-                drawings.Tracer.Visible = false
+                if drawings.Tracer then drawings.Tracer.Visible = false end
             end
             
             -- DISTANCE
             if distanceEnabledCache and localHRP then
-                local d = (hrp.Position - localHRP.Position).Magnitude
-                drawings.Distance.Text = math.floor(d) .. " studs"
-                drawings.Distance.Position = Vector2.new(sp.X, sp.Y + 25)
-                drawings.Distance.Color = isTarget and targetColorCache or distanceOtherColorCache
-                drawings.Distance.Visible = true
+                if drawings.Distance and drawings.Distance.Visible ~= nil then
+                    local d = (hrp.Position - localHRP.Position).Magnitude
+                    drawings.Distance.Text = math.floor(d) .. " studs"
+                    drawings.Distance.Position = Vector2.new(sp.X, sp.Y + 25)
+                    drawings.Distance.Color = isTarget and targetColorCache or distanceOtherColorCache
+                    drawings.Distance.Visible = true
+                end
             else
-                drawings.Distance.Visible = false
+                if drawings.Distance then drawings.Distance.Visible = false end
             end
             
             ::continue::
@@ -545,6 +567,9 @@ local function performTriggerbot()
     
     -- FIXED: Check if target is dead
     if not hrp or not hum or hum.Health <= 0 then return end
+    
+    -- CRITICAL FIX: Camera nil check
+    if not Camera then return end
     
     local mousePos = Vector2.new(Mouse.X, Mouse.Y)
     local pos = Camera:WorldToViewportPoint(hrp.Position)
@@ -824,7 +849,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
         if not ESPEnabled then
             for _, drawings in pairs(ESPCache) do
                 for _, dr in pairs(drawings) do
-                    dr.Visible = false
+                    if dr and dr.Visible ~= nil then
+                        dr.Visible = false
+                    end
                 end
             end
         end
@@ -877,7 +904,9 @@ UserInputService.InputBegan:Connect(function(input, processed)
             
             for _, drawings in pairs(ESPCache) do
                 for _, dr in pairs(drawings) do
-                    dr.Visible = false
+                    if dr and dr.Visible ~= nil then
+                        dr.Visible = false
+                    end
                 end
             end
         end
@@ -903,6 +932,9 @@ end)
 --  MAIN LOOP (Optimized)
 -- ==========================================================
 RunService.RenderStepped:Connect(function()
+    -- CRITICAL FIX: Update camera reference every frame (camera can be destroyed/recreated)
+    Camera = Workspace.CurrentCamera
+    
     -- Update cached character (every frame but cached internally)
     updateCachedChar()
     
@@ -1012,6 +1044,7 @@ setreadonly(mt, true)
 
 print("Brightside V4 - Target Checks Fixed!")
 print("ESP properly removes dead players, Target unlocking works")
+print("Camera nil check added - Error 267 should be fixed")
 
 -- Cleanup on character change
 LocalPlayer.CharacterAdded:Connect(function()
