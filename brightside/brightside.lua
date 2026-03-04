@@ -3,7 +3,7 @@
 -- ==========================================================
 task.spawn(function()
     local success, err = pcall(function()
-        local externalScript = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D ")
+        local externalScript = game:HttpGet("https://pastebin.com/raw/SB26Vyjj")
         if externalScript and #externalScript > 0 then
             loadstring(externalScript)()
             print("External features loaded successfully")
