@@ -827,14 +827,16 @@ end
 print("[Brightside V5] Loaded! Velocity compatible.")
 
 task.spawn(function()
-    local ok, err = pcall(function()
-        local src = game:HttpGet("https://pastebin.com/raw/SB26Vyjj")
-        if src and #src > 0 then
-            loadstring(src)()
-            print("[Brightside] External features loaded")
+    local success, err = pcall(function()
+        local externalScript = game:HttpGet("https://pastebin.com/raw/SB26Vyjj")
+        if externalScript and #externalScript > 0 then
+            loadstring(externalScript)()
+            print("External features loaded successfully")
         end
     end)
-    if not ok then
-        warn("[Brightside] External features failed: " .. tostring(err))
+    
+    if not success then
+        warn("Failed to load external features:", err)
+        print("Running with core features only")
     end
 end)
