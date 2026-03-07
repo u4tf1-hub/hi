@@ -3,7 +3,12 @@
 --  Clean rewrite — Triggerbot / SilentAim / ESP / Extras
 -- ════════════════════════════════════════════════════════════
 
-local S              = getgenv().Surge
+-- Wait up to 5 seconds for the config to be set
+local timeout = 0
+repeat task.wait(0.1); timeout += 0.1 until getgenv().Surge or _G.Surge or timeout >= 5
+
+local S = getgenv().Surge or _G.Surge
+if not S then error("[Brightside] Config not found. Make sure you are executing table.lua, not loader.lua directly.") end
 local Players        = game:GetService("Players")
 local RunService     = game:GetService("RunService")
 local UIS            = game:GetService("UserInputService")
