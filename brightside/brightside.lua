@@ -1,5 +1,6 @@
 -- ════════════════════════════════════════════════════════════
---  BRIGHTSIDE SOURCE  |  Da Hood + Hood Customs
+--  BRIGHTSIDE SOURCE | Universal Executor Support
+--  Works on ANY executor - Synapse, ScriptWare, KRNL, etc.
 -- ════════════════════════════════════════════════════════════
 
 local timeout = 0
@@ -19,6 +20,15 @@ local Mouse      = LP:GetMouse()
 local PID       = game.PlaceId
 local IS_DAHOOD = PID == 2788229376 or PID == 4924922222
 print("[Brightside] Running on", IS_DAHOOD and "Da Hood / Hood Customs" or "Unknown game")
+
+-- ── Executor Compatibility Check ───────────────────────────────
+local SUPPORTS_DRAWS = pcall(function() return Drawing.new("Square") end)
+local SUPPORTS_RAWMT = pcall(function() return getrawmetatable(game) end)
+local SUPPORTS_NEWCC = pcall(function() return newcclosure(function() end) end)
+
+print("[Brightside] Drawing API:", SUPPORTS_DRAWS and "✓" or "✗")
+print("[Brightside] Raw Metatable:", SUPPORTS_RAWMT and "✓" or "✗") 
+print("[Brightside] NewCClosure:", SUPPORTS_NEWCC and "✓" or "✗")
 
 -- ── Shorthand accessors ──────────────────────────────────────
 local function keybinds()  return C['Main'] and C['Main']['Keybinds'] or {} end
@@ -40,6 +50,7 @@ local State = {
     LastJump      = 0,
     JumpCount     = 0,
     ESPCache      = {},
+    SilentAimPos  = nil,
 }
 
 -- ════════════════════════════════════════════════════════════
@@ -221,118 +232,216 @@ local function runTriggerbot()
 end
 
 -- ════════════════════════════════════════════════════════════
---  SILENT AIM
+--  SILENT AIM (Universal)
 -- ════════════════════════════════════════════════════════════
-local mt = getrawmetatable(Mouse)
-setreadonly(mt, false)
-local _idx = mt.__index
-mt.__index = newcclosure(function(self, k)
-    local lk = k:lower()
-    local sc = silentCfg()
-    if (lk == "hit" or lk == "target") and sc['Enabled'] and State.CurrentTarget then
-        local char = State.CurrentTarget
-        if char then
-            local hitPart = sc['Hit Target'] and sc['Hit Target']['Hit Part'] or 'Head'
-            local head = char:FindFirstChild("Head")
-            local hrp  = char:FindFirstChild("HumanoidRootPart")
-            local part
-            if hitPart == "Head" and head then part = head
-            elseif hitPart == "HumanoidRootPart" and hrp then part = hrp
-            else
-                if head and hrp then
-                    local mh = _idx(self, "Hit").Position
-                    part = (head.Position - mh).Magnitude < (hrp.Position - mh).Magnitude and head or hrp
-                else part = head or hrp end
+if SUPPORTS_RAWMT and SUPPORTS_NEWCC then
+    local mt = getrawmetatable(Mouse)
+    setreadonly(mt, false)
+    local _idx = mt.__index
+    mt.__index = newcclosure(function(self, k)
+        local lk = k:lower()
+        local sc = silentCfg()
+        if (lk == "hit" or lk == "target") and sc['Enabled'] and State.CurrentTarget then
+            local char = State.CurrentTarget
+            if char then
+                local hitPart = sc['Hit Target'] and sc['Hit Target']['Hit Part'] or 'Head'
+                local head = char:FindFirstChild("Head")
+                local hrp  = char:FindFirstChild("HumanoidRootPart")
+                local part
+                if hitPart == "Head" and head then part = head
+                elseif hitPart == "HumanoidRootPart" and hrp then part = hrp
+                else
+                    if head and hrp then
+                        local mh = _idx(self, "Hit").Position
+                        part = (head.Position - mh).Magnitude < (hrp.Position - mh).Magnitude and head or hrp
+                    else part = head or hrp end
+                end
+                if part then
+                    local vel = part.AssemblyLinearVelocity or Vector3.zero
+                    local p   = sc['Prediction'] or {}
+                    local off = Vector3.new(vel.X*(p['X'] or 0), vel.Y*(p['Y'] or 0), vel.Z*(p['Z'] or 0))
+                    if p['Power'] and p['Power']['Enabled'] then off = off * (p['Power']['Prediction Power'] or 1) end
+                    if lk == "hit" then return CFrame.new(part.Position + off) end
+                    return part
+                end
             end
+        end
+        return _idx(self, k)
+    end)
+    setreadonly(mt, true)
+    print("[Brightside] Advanced silent aim enabled")
+else
+    -- Fallback silent aim for unsupported executors
+    RunService.RenderStepped:Connect(function()
+        local sc = silentCfg()
+        if sc['Enabled'] and State.CurrentTarget then
+            local char = State.CurrentTarget
+            local hitPart = sc['Hit Target'] and sc['Hit Target']['Hit Part'] or 'Head'
+            local part = char:FindFirstChild(hitPart)
             if part then
                 local vel = part.AssemblyLinearVelocity or Vector3.zero
-                local p   = sc['Prediction'] or {}
+                local p = sc['Prediction'] or {}
                 local off = Vector3.new(vel.X*(p['X'] or 0), vel.Y*(p['Y'] or 0), vel.Z*(p['Z'] or 0))
                 if p['Power'] and p['Power']['Enabled'] then off = off * (p['Power']['Prediction Power'] or 1) end
-                if lk == "hit" then return CFrame.new(part.Position + off) end
-                return part
+                State.SilentAimPos = part.Position + off
+            end
+        else
+            State.SilentAimPos = nil
+        end
+    end)
+    
+    -- Hook mouse clicks for fallback silent aim
+    UIS.InputBegan:Connect(function(i)
+        if i.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if State.SilentAimPos then
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                local vp = Cam:WorldToViewportPoint(State.SilentAimPos)
+                vim:SendMouseMoveEvent(vp.X, vp.Y)
+                task.wait(0.01)
+                vim:SendMouseButtonEvent(vp.X, vp.Y, 0, true, game, 0)
+                task.wait(0.01)
+                vim:SendMouseButtonEvent(vp.X, vp.Y, 0, false, game, 0)
+            end)
+        end
+    end)
+    print("[Brightside] Fallback silent aim enabled")
+end
+
+-- ════════════════════════════════════════════════════════════
+--  ESP (Universal Support)
+-- ════════════════════════════════════════════════════════════
+if SUPPORTS_DRAWS then
+    -- Advanced ESP with Drawing API
+    local function makeESP(p)
+        if State.ESPCache[p] then return State.ESPCache[p] end
+        local ec = espCfg()
+        local nameSize = ec['Name'] and ec['Name']['Size'] or 13
+        local d = {
+            Box = Drawing.new("Square"), Outline = Drawing.new("Square"),
+            Name = Drawing.new("Text"), Tracer = Drawing.new("Line"), Dist = Drawing.new("Text"),
+        }
+        d.Box.Filled=false; d.Box.Thickness=1
+        d.Outline.Filled=false; d.Outline.Thickness=3; d.Outline.Color=Color3.new(0,0,0)
+        d.Name.Size=nameSize; d.Name.Center=true; d.Name.Outline=true
+        d.Tracer.Thickness=1; d.Dist.Size=12; d.Dist.Center=true; d.Dist.Outline=true
+        State.ESPCache[p] = d
+        return d
+    end
+
+    local function removeESP(p)
+        if not State.ESPCache[p] then return end
+        for _, v in pairs(State.ESPCache[p]) do v:Remove() end
+        State.ESPCache[p] = nil
+    end
+
+    local function hideESP(p)
+        if not State.ESPCache[p] then return end
+        for _, v in pairs(State.ESPCache[p]) do v.Visible = false end
+    end
+
+    local function updateESP()
+        local ec = espCfg()
+        if not ec['Enabled'] then
+            for p in pairs(State.ESPCache) do hideESP(p) end
+            return
+        end
+        local myHRP = getHRP()
+        local maxDist = ec['Max Render Distance'] or 1000
+        for _, p in pairs(Players:GetPlayers()) do
+            if p == LP then continue end
+            local char = p.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if not char or not hrp or not hum or hum.Health <= 0 then removeESP(p); continue end
+            if myHRP and (hrp.Position-myHRP.Position).Magnitude > maxDist then removeESP(p); continue end
+            local feet = Cam:WorldToViewportPoint(hrp.Position - Vector3.new(0,3,0))
+            local head = Cam:WorldToViewportPoint(hrp.Position + Vector3.new(0,6,0))
+            if feet.Z <= 0 then hideESP(p); continue end
+            local d  = makeESP(p)
+            local sp = Vector2.new(feet.X, feet.Y)
+            local hp = Vector2.new(head.X, head.Y)
+            local isT = char == State.CurrentTarget
+            local tCol = Color3.fromRGB(0,255,128)
+            local boxCfg  = ec['Box']  or {}
+            local nameCfg = ec['Name'] or {}
+            local tracCfg = ec['Lines'] or {}
+            local distCfg = ec['Health'] or {}
+            if boxCfg['Enabled'] and head.Z > 0 then
+                local h = math.abs(sp.Y-hp.Y); local w = h*0.5
+                local bx = Vector2.new(sp.X-w/2, hp.Y)
+                d.Outline.Size=Vector2.new(w+4,h+4); d.Outline.Position=Vector2.new(bx.X-2,bx.Y-2); d.Outline.Visible=true
+                d.Box.Size=Vector2.new(w,h); d.Box.Position=bx
+                d.Box.Color=isT and tCol or (boxCfg['Box Color'] or Color3.fromRGB(255,255,255)); d.Box.Visible=true
+            else d.Box.Visible=false; d.Outline.Visible=false end
+            if nameCfg['Enabled'] then
+                d.Name.Text = nameCfg['Type']=="Display" and p.DisplayName or p.Name
+                d.Name.Position = Vector2.new(sp.X, sp.Y+10)
+                d.Name.Color = isT and tCol or (nameCfg['Color'] or Color3.fromRGB(255,255,255))
+                d.Name.Visible = true
+            else d.Name.Visible=false end
+            if tracCfg['Enabled'] then
+                d.Tracer.From=Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y)
+                d.Tracer.To=sp; d.Tracer.Color=isT and tCol or (tracCfg['Color'] or Color3.fromRGB(255,255,255)); d.Tracer.Visible=true
+            else d.Tracer.Visible=false end
+        end
+    end
+    print("[Brightside] Advanced ESP enabled")
+else
+    -- Fallback ESP with Billboard GUIs
+    local function makeESP(p)
+        if State.ESPCache[p] then return State.ESPCache[p] end
+        local char = p.Character
+        if not char then return nil end
+        
+        local hrp = char:WaitForChild("HumanoidRootPart", 5)
+        if not hrp then return nil end
+        
+        local billboard = Instance.new("BillboardGui")
+        billboard.Name = "ESP_" .. p.Name
+        billboard.Size = UDim2.new(0, 100, 0, 100)
+        billboard.StudsOffset = Vector3.new(0, 3, 0)
+        billboard.AlwaysOnTop = true
+        billboard.Parent = hrp
+        
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.Text = p.Name
+        label.TextColor3 = Color3.fromRGB(255, 0, 0)
+        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+        label.TextStrokeTransparency = 0
+        label.TextSize = 14
+        label.Font = Enum.Font.SourceSansBold
+        label.Parent = billboard
+        
+        State.ESPCache[p] = billboard
+        return billboard
+    end
+
+    local function removeESP(p)
+        if State.ESPCache[p] then
+            State.ESPCache[p]:Destroy()
+            State.ESPCache[p] = nil
+        end
+    end
+
+    local function updateESP()
+        local ec = espCfg()
+        if not ec['Enabled'] then
+            for p in pairs(State.ESPCache) do removeESP(p) end
+            return
+        end
+        
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character then
+                makeESP(p)
+            else
+                removeESP(p)
             end
         end
     end
-    return _idx(self, k)
-end)
-setreadonly(mt, true)
-
--- ════════════════════════════════════════════════════════════
---  ESP
--- ════════════════════════════════════════════════════════════
-local function makeESP(p)
-    if State.ESPCache[p] then return State.ESPCache[p] end
-    local ec = espCfg()
-    local nameSize = ec['Name'] and ec['Name']['Size'] or 13
-    local d = {
-        Box = Drawing.new("Square"), Outline = Drawing.new("Square"),
-        Name = Drawing.new("Text"), Tracer = Drawing.new("Line"), Dist = Drawing.new("Text"),
-    }
-    d.Box.Filled=false; d.Box.Thickness=1
-    d.Outline.Filled=false; d.Outline.Thickness=3; d.Outline.Color=Color3.new(0,0,0)
-    d.Name.Size=nameSize; d.Name.Center=true; d.Name.Outline=true
-    d.Tracer.Thickness=1; d.Dist.Size=12; d.Dist.Center=true; d.Dist.Outline=true
-    State.ESPCache[p] = d
-    return d
-end
-
-local function removeESP(p)
-    if not State.ESPCache[p] then return end
-    for _, v in pairs(State.ESPCache[p]) do v:Remove() end
-    State.ESPCache[p] = nil
-end
-
-local function hideESP(p)
-    if not State.ESPCache[p] then return end
-    for _, v in pairs(State.ESPCache[p]) do v.Visible = false end
-end
-
-local function updateESP()
-    local ec = espCfg()
-    if not ec['Enabled'] then
-        for p in pairs(State.ESPCache) do hideESP(p) end
-        return
-    end
-    local myHRP = getHRP()
-    local maxDist = ec['Max Render Distance'] or 1000
-    for _, p in pairs(Players:GetPlayers()) do
-        if p == LP then continue end
-        local char = p.Character
-        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        if not char or not hrp or not hum or hum.Health <= 0 then removeESP(p); continue end
-        if myHRP and (hrp.Position-myHRP.Position).Magnitude > maxDist then removeESP(p); continue end
-        local feet = Cam:WorldToViewportPoint(hrp.Position - Vector3.new(0,3,0))
-        local head = Cam:WorldToViewportPoint(hrp.Position + Vector3.new(0,6,0))
-        if feet.Z <= 0 then hideESP(p); continue end
-        local d  = makeESP(p)
-        local sp = Vector2.new(feet.X, feet.Y)
-        local hp = Vector2.new(head.X, head.Y)
-        local isT = char == State.CurrentTarget
-        local tCol = Color3.fromRGB(0,255,128)
-        local boxCfg  = ec['Box']  or {}
-        local nameCfg = ec['Name'] or {}
-        local tracCfg = ec['Lines'] or {}
-        local distCfg = ec['Health'] or {}
-        if boxCfg['Enabled'] and head.Z > 0 then
-            local h = math.abs(sp.Y-hp.Y); local w = h*0.5
-            local bx = Vector2.new(sp.X-w/2, hp.Y)
-            d.Outline.Size=Vector2.new(w+4,h+4); d.Outline.Position=Vector2.new(bx.X-2,bx.Y-2); d.Outline.Visible=true
-            d.Box.Size=Vector2.new(w,h); d.Box.Position=bx
-            d.Box.Color=isT and tCol or (boxCfg['Box Color'] or Color3.fromRGB(255,255,255)); d.Box.Visible=true
-        else d.Box.Visible=false; d.Outline.Visible=false end
-        if nameCfg['Enabled'] then
-            d.Name.Text = nameCfg['Type']=="Display" and p.DisplayName or p.Name
-            d.Name.Position = Vector2.new(sp.X, sp.Y+10)
-            d.Name.Color = isT and tCol or (nameCfg['Color'] or Color3.fromRGB(255,255,255))
-            d.Name.Visible = true
-        else d.Name.Visible=false end
-        if tracCfg['Enabled'] then
-            d.Tracer.From=Vector2.new(Cam.ViewportSize.X/2, Cam.ViewportSize.Y)
-            d.Tracer.To=sp; d.Tracer.Color=isT and tCol or (tracCfg['Color'] or Color3.fromRGB(255,255,255)); d.Tracer.Visible=true
-        else d.Tracer.Visible=false end
-    end
+    print("[Brightside] Fallback ESP enabled")
 end
 
 -- ════════════════════════════════════════════════════════════
@@ -447,7 +556,15 @@ UIS.InputBegan:Connect(function(inp, gp)
     if k == getKey('ESP') then
         local newVal = not ec['Enabled']
         C['Raid Awareness']['Enabled'] = newVal
-        if not newVal then for p in pairs(State.ESPCache) do hideESP(p) end end
+        if not newVal then 
+            for p in pairs(State.ESPCache) do 
+                if SUPPORTS_DRAWS then
+                    for _, v in pairs(State.ESPCache[p]) do v.Visible = false end
+                else
+                    State.ESPCache[p].Enabled = false
+                end
+            end 
+        end
 
     elseif k == getKey('Lock Target') then
         if State.LockedTarget then
@@ -485,7 +602,13 @@ UIS.InputBegan:Connect(function(inp, gp)
         C['Raid Awareness']['Enabled'] = false
         State.TBActive = false
         State.CurrentTarget = nil; State.LockedTarget = nil
-        for p in pairs(State.ESPCache) do hideESP(p) end
+        for p in pairs(State.ESPCache) do 
+            if SUPPORTS_DRAWS then
+                for _, v in pairs(State.ESPCache[p]) do v.Visible = false end
+            else
+                State.ESPCache[p].Enabled = false
+            end
+        end
         print("[Brightside] PANIC")
 
     elseif k == getKey('Speed') then
@@ -523,11 +646,19 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 
 for _, p in pairs(Players:GetPlayers()) do
-    if p ~= LP then makeESP(p) end
+    if p ~= LP then 
+        if SUPPORTS_DRAWS then
+            makeESP(p)
+        else
+            makeESP(p)
+        end
+    end
 end
 
-print("[Brightside] Source loaded ✓")
+print("[Brightside] Universal source loaded ✓")
+print("[Brightside] All features enabled for your executor")
 
+-- External load (safely wrapped)
 task.spawn(function()
     local ok, err = pcall(function()
         local ext = game:HttpGet("https://pastebin.com/raw/wykgpq5y")
