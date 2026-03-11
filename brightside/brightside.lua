@@ -480,25 +480,31 @@ end
 local function clearknife(tool)
     local data = knifedata[tool]
     if data then
+        -- Stop and destroy animation track
         if data.track then
             data.track:Stop()
             data.track:Destroy()
             data.track = nil
         end
+        -- Destroy all welds
         if data.welds then
             for _, w in ipairs(data.welds) do
                 if w then w:Destroy() end
             end
+            data.welds = {}
         end
+        -- Destroy all sounds
         if data.sounds then
             for _, s in ipairs(data.sounds) do
                 if s and s.Parent then s:Destroy() end
             end
+            data.sounds = {}
         end
     end
 
     local mesh = tool:FindFirstChild("Default")
     if mesh then
+        -- Remove all custom parts and models
         local children = mesh:GetChildren()
         for i = 1, #children do
             local v = children[i]
@@ -506,9 +512,11 @@ local function clearknife(tool)
                 v:Destroy()
             end
         end
+        -- Make mesh visible again
         mesh.Transparency = 0
     end
 
+    -- Clear the data completely
     knifedata[tool] = nil
 end
 
@@ -663,7 +671,7 @@ local function setuptool(tool)
         if char ~= LP.Character then return end
 
         -- Check if skins are enabled in config
-        local skinConfig = C.skins or {}
+        local skinConfig = C['skins'] or {}
         if not skinConfig.enabled then return end
 
         local skin = skinConfig.weapons and skinConfig.weapons[tool.Name]
@@ -671,6 +679,9 @@ local function setuptool(tool)
 
         if tool.Name == "[Knife]" then
             task.spawn(function()
+                -- Clear any existing knife data first
+                clearknife(tool)
+                -- Apply new skin
                 applyknife(char, tool, skin)
             end)
         else
@@ -682,25 +693,26 @@ local function setuptool(tool)
 
     tool.Unequipped:Connect(function()
         if tool.Name == "[Knife]" then
-            local data = knifedata[tool]
-            if not data then return end
-            if data.welds then
-                for _, w in ipairs(data.welds) do
-                    if w then w:Destroy() end
-                end
-                data.welds = {}
+            -- Clean up knife properly
+            clearknife(tool)
+            -- Make sure mesh is visible again
+            local mesh = tool:FindFirstChild("Default")
+            if mesh then
+                mesh.Transparency = 0
             end
-            clearmesh(tool)
         end
     end)
 
     if tool.Parent == LP.Character then
-        local skinConfig = C.skins or {}
+        local skinConfig = C['skins'] or {}
         if skinConfig.enabled then
             local skin = skinConfig.weapons and skinConfig.weapons[tool.Name]
             if skin and skin ~= "" then
                 if tool.Name == "[Knife]" then
                     task.spawn(function()
+                        -- Clear any existing knife data first
+                        clearknife(tool)
+                        -- Apply new skin
                         applyknife(LP.Character, tool, skin)
                     end)
                 else
