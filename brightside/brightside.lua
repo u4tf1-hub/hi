@@ -1,3 +1,12 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local camera = Workspace.CurrentCamera
+local localPlayer = Players.LocalPlayer
+local mouse = localPlayer:GetMouse()
+
 -- Game ID Check
 if game.PlaceId ~= 2788229376 then
     return
@@ -257,31 +266,32 @@ end
 local originalIndex
 if hookmetamethod then
     originalIndex = hookmetamethod(game, "__index", function(t, k)
-        if not (getgenv().Brightside['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
-            return originalIndex(t, k)
-        end
-
-        local hitData = getClosestBodyPart(targetPlayer.Character)
-        if not hitData or not hitData.Part then
-            return originalIndex(t, k)
-        end
-
-        if not isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character) then
-            return originalIndex(t, k)
-        end
-
-        if k == "Hit" then
-            local pos = hitData.Position
-            local pred = getgenv().Brightside['Silent Aimbot'].Prediction
-            local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root and (pred.X ~= 0 or pred.Y ~= 0 or pred.Z ~= 0) then
-                pos = pos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
+        pcall(function()
+            if not (getgenv().Brightside['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
+                return originalIndex(t, k)
             end
-            return CFrame.new(pos)
-        elseif k == "Target" then
-            return hitData.Part
-        end
 
+            local hitData = getClosestBodyPart(targetPlayer.Character)
+            if not hitData or not hitData.Part then
+                return originalIndex(t, k)
+            end
+
+            if not isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character) then
+                return originalIndex(t, k)
+            end
+
+            if k == "Hit" then
+                local pos = hitData.Position
+                local pred = getgenv().Brightside['Silent Aimbot'].Prediction
+                local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root and (pred.X ~= 0 or pred.Y ~= 0 or pred.Z ~= 0) then
+                    pos = pos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
+                end
+                return CFrame.new(pos)
+            elseif k == "Target" then
+                return hitData.Part
+            end
+        end)
         return originalIndex(t, k)
     end)
 end
