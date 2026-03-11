@@ -1,4 +1,3 @@
-
 -- ════════════════════════════════════════════════════════════
 --  SERVICES & VARIABLES
 -- ════════════════════════════════════════════════════════════
@@ -620,7 +619,9 @@ local function rapidfire()
         end
     end
 
-    gun:Activate()
+    pcall(function()
+        gun:Activate()
+    end)
     lastrapidfire = tick()
 end
 
@@ -629,14 +630,15 @@ if localPlayer.Character then
     oncharrapidfire(localPlayer.Character)
 end
 
--- triggerbot 
+-- triggerbot (fixed to prevent crashes)
 local function triggerbot()
-    local Tool = localPlayer.Character:FindFirstChildOfClass("Tool")
-    if Tool and Tool:IsDescendantOf(localPlayer.Character) and Tool.Name ~= '[Knife]' then
-        for i = 1, 3 do
-            Tool:Activate()
-        end
-    end
+    local Tool = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
+    if not Tool then return end
+    if Tool.Name == '[Knife]' then return end
+    
+    pcall(function()
+        Tool:Activate()
+    end)
 end
 
 -- ════════════════════════════════════════════════════════════
@@ -655,19 +657,28 @@ local function getEquippedGun()
     return nil
 end
 
--- zero every number upvalue across all Activated/MouseButton connections on tool
+-- zero every number upvalue across all Activated/MouseButton connections on tool (fixed)
 local function nukeToolCooldowns(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    
     pcall(function()
-        for _, conn in pairs(getconnections(tool.Activated)) do
-            local ok, info = pcall(debug.getinfo, conn.Function)
-            if ok and info then
-                for i = 1, info.nups do
-                    local ok2, _, val = pcall(debug.getupvalue, conn.Function, i)
-                    if ok2 and type(val) == "number" and val > 0 then
-                        pcall(debug.setupvalue, conn.Function, i, 0)
+        local success, connections = pcall(getconnections, tool.Activated)
+        if not success or not connections then return end
+        
+        for _, conn in pairs(connections) do
+            pcall(function()
+                local ok, info = pcall(debug.getinfo, conn.Function)
+                if ok and info and info.nups then
+                    for i = 1, info.nups do
+                        pcall(function()
+                            local ok2, _, val = pcall(debug.getupvalue, conn.Function, i)
+                            if ok2 and type(val) == "number" and val > 0 then
+                                pcall(debug.setupvalue, conn.Function, i, 0)
+                            end
+                        end)
                     end
                 end
-            end
+            end)
         end
     end)
 end
@@ -1549,35 +1560,36 @@ Players.PlayerRemoving:Connect(function(player)
     removeesp(player)
 end)
 
--- Silent Aimbot Hook
+-- Silent Aimbot Hook (fixed to prevent crashes)
 local originalIndex
 if hookmetamethod then
     originalIndex = hookmetamethod(game, "__index", function(t, k)
-        if not (getgenv().Brightside['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
-            return originalIndex(t, k)
-        end
-
-        local hitData = getClosestBodyPart(targetPlayer.Character)
-        if not hitData or not hitData.Part then
-            return originalIndex(t, k)
-        end
-
-        if not isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character) then
-            return originalIndex(t, k)
-        end
-
-        if k == "Hit" then
-            local pos = hitData.Position
-            local pred = getgenv().Brightside['Silent Aimbot'].Prediction
-            local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root and (pred.X ~= 0 or pred.Y ~= 0 or pred.Z ~= 0) then
-                pos = pos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
+        pcall(function()
+            if not (getgenv().Brightside['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
+                return originalIndex(t, k)
             end
-            return CFrame.new(pos)
-        elseif k == "Target" then
-            return hitData.Part
-        end
 
+            local hitData = getClosestBodyPart(targetPlayer.Character)
+            if not hitData or not hitData.Part then
+                return originalIndex(t, k)
+            end
+
+            if not isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character) then
+                return originalIndex(t, k)
+            end
+
+            if k == "Hit" then
+                local pos = hitData.Position
+                local pred = getgenv().Brightside['Silent Aimbot'].Prediction
+                local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root and (pred.X ~= 0 or pred.Y ~= 0 or pred.Z ~= 0) then
+                    pos = pos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
+                end
+                return CFrame.new(pos)
+            elseif k == "Target" then
+                return hitData.Part
+            end
+        end)
         return originalIndex(t, k)
     end)
 end
@@ -1711,87 +1723,93 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Main Game Loop
+-- Main Game Loop (fixed to prevent crashes)
 RunService.RenderStepped:Connect(function()
-    rapidfire()
-    refreshesp()
+    pcall(function()
+        rapidfire()
+        refreshesp()
 
-    local gun = getEquippedGun()
+        local gun = getEquippedGun()
 
-    -- infinite ammo
-    if infammoenabled and getgenv().Brightside['inf ammo']['enabled'] then
-        if gun then
-            local ammo = gun:FindFirstChild("Ammo")
-            if ammo then
-                ammo.Value = 30
+        -- infinite ammo
+        if infammoenabled and getgenv().Brightside['inf ammo']['enabled'] then
+            if gun then
+                local ammo = gun:FindFirstChild("Ammo")
+                if ammo then
+                    ammo.Value = 30
+                end
             end
         end
-    end
 
-    -- no cooldown
-    if nocooldownenabled and getgenv().Brightside['no cooldown']['enabled'] then
-        if gun then
-            nukeToolCooldowns(gun)
-        end
-    end
-
-    if superjumpenabled and getgenv().Brightside['super jump']['enabled'] then
-        local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
-        if hum then
-            if hum.JumpPower ~= getgenv().Brightside['super jump']['jump power'] then
-                hum.JumpPower = getgenv().Brightside['super jump']['jump power']
+        -- no cooldown
+        if nocooldownenabled and getgenv().Brightside['no cooldown']['enabled'] then
+            if gun then
+                nukeToolCooldowns(gun)
             end
         end
-    end
 
-    if getgenv().Brightside['Speed Modifications']['Enabled'] and speedenabled then
-        local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
-        if hum then
-            hum.WalkSpeed = 16 * getgenv().Brightside['Speed Modifications']['Normal']['Multiplier']
-        end
-    end
-
-    -- Triggerbot logic
-    if getgenv().Brightside['Trigger Bot'].Enabled and not leftCtrlHeld then
-        local targetKnocked = getgenv().Brightside.Checks['Knock Check'] and isTargetKnocked(targetPlayer)
-        if not targetKnocked then
-            local cfg = getgenv().Brightside['Trigger Bot'].Settings
-            local isSelectMode = (getgenv().Brightside['Targeting']['Target Mode'] == "Select")
-            local forceTrigger = isSelectMode and getgenv().Brightside['Select Only Features']['Force Trigger']
-
-            local active = forceTrigger or (cfg.Mode == "Always") or (cfg.Mode == "Toggle" and triggerBotActive)
-            if active then
-                local now = tick()
-                local delay = getTriggerbotDelay()
-                if delay > 0 and (now - lastTriggerTime) < delay then return end
-
-                local inRange = forceTrigger or 
-                               (cfg.Type == "FOV" and isMouseInTriggerFOV()) or 
-                               (cfg.Type == "Hitbox" and isMouseInTriggerHitbox())
-
-                if inRange then
-                    local hitData
-                    if forceTrigger then
-                        local head = targetPlayer.Character:FindFirstChild("Head")
-                        if head and head:IsA("BasePart") then
-                            hitData = { Part = head, Position = head.Position }
-                        end
-                    else
-                        hitData = getClosestBodyPart(targetPlayer.Character)
+        if superjumpenabled and getgenv().Brightside['super jump']['enabled'] then
+            local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                pcall(function()
+                    if hum.JumpPower ~= getgenv().Brightside['super jump']['jump power'] then
+                        hum.JumpPower = getgenv().Brightside['super jump']['jump power']
                     end
+                end)
+            end
+        end
 
-                    if hitData and hitData.Part then
-                        local visible = not getgenv().Brightside.Checks['Visible Check'] or 
-                                       isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character)
-                        if visible then
-                            triggerbot()
-                            lastTriggerTime = now
+        if getgenv().Brightside['Speed Modifications']['Enabled'] and speedenabled then
+            local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
+            if hum then
+                pcall(function()
+                    hum.WalkSpeed = 16 * getgenv().Brightside['Speed Modifications']['Normal']['Multiplier']
+                end)
+            end
+        end
+
+        -- Triggerbot logic
+        if getgenv().Brightside['Trigger Bot'].Enabled and not leftCtrlHeld then
+            local targetKnocked = getgenv().Brightside.Checks['Knock Check'] and isTargetKnocked(targetPlayer)
+            if not targetKnocked then
+                local cfg = getgenv().Brightside['Trigger Bot'].Settings
+                local isSelectMode = (getgenv().Brightside['Targeting']['Target Mode'] == "Select")
+                local forceTrigger = isSelectMode and getgenv().Brightside['Select Only Features']['Force Trigger']
+
+                local active = forceTrigger or (cfg.Mode == "Always") or (cfg.Mode == "Toggle" and triggerBotActive)
+                if active then
+                    local now = tick()
+                    local delay = getTriggerbotDelay()
+                    if delay > 0 and (now - lastTriggerTime) < delay then return end
+
+                    local inRange = forceTrigger or 
+                                   (cfg.Type == "FOV" and isMouseInTriggerFOV()) or 
+                                   (cfg.Type == "Hitbox" and isMouseInTriggerHitbox())
+
+                    if inRange then
+                        local hitData
+                        if forceTrigger then
+                            local head = targetPlayer.Character:FindFirstChild("Head")
+                            if head and head:IsA("BasePart") then
+                                hitData = { Part = head, Position = head.Position }
+                            end
+                        else
+                            hitData = getClosestBodyPart(targetPlayer.Character)
+                        end
+
+                        if hitData and hitData.Part then
+                            local visible = not getgenv().Brightside.Checks['Visible Check'] or 
+                                           isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character)
+                            if visible then
+                                triggerbot()
+                                lastTriggerTime = now
+                            end
                         end
                     end
                 end
             end
         end
-    end
 
-    updatetargetline()
+        updatetargetline()
+    end)
 end)
