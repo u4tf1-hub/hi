@@ -362,8 +362,10 @@ else
 end
 
 -- 
---  WORKING SKIN CHANGER (Complete Database)
+--  COMPLETE SKIN CHANGER (From WizPrivate)
 -- 
+local knifedata = {}
+
 local knifeskins = {
     ["Golden Age Tanto"] = {soundid = "rbxassetid://5917819099", animationid = "rbxassetid://13473404819", positionoffset = Vector3.new(0, -0.20, -1.2), rotationoffset = Vector3.new(90, 263.7, 180)},
     ["GPO-Knife"] = {soundid = "rbxassetid://4604390759", animationid = "rbxassetid://14014278925", positionoffset = Vector3.new(0.00, -0.32, -1.07), rotationoffset = Vector3.new(90, -97.4, 90)},
@@ -386,12 +388,6 @@ local knifeskins = {
     ["Emerald"] = {soundid = "", animationid = "", positionoffset = Vector3.new(-0.03, -0.06, -0.92), rotationoffset = Vector3.new(168.63, 90.00, 108.00)},
     ["Ribbon"] = {soundid = "rbxassetid://130974579277249", animationid = "rbxassetid://124102609796063", positionoffset = Vector3.new(0.02, -0.25, -0.05), rotationoffset = Vector3.new(90.00, 0.00, 180.00)},
 }
-
--- Gun skins will use the game's built-in skin system
-local gunskins = {}
-
-local toolregistry = {}
-local knifedata = {}
 
 local replicatedstorage = game:GetService("ReplicatedStorage")
 
@@ -454,6 +450,25 @@ local function applygun(tool, name)
                 local obj = sounds and sounds:FindFirstChild(name)
                 if obj then
                     shoot.SoundId = obj.Value
+                end
+            end
+        end
+    end
+
+    local skinassets = replicatedstorage:FindFirstChild("SkinAssets")
+    if skinassets then
+        local particlefolder = skinassets:FindFirstChild("GunHandleParticle")
+        if particlefolder then
+            local particlesource = particlefolder:FindFirstChild(name)
+            if particlesource then
+                local pe = particlesource:FindFirstChild("ParticleEmitter")
+                if pe then
+                    for _, existing in ipairs(handle:GetChildren()) do
+                        if existing:IsA("ParticleEmitter") then
+                            existing:Destroy()
+                        end
+                    end
+                    pe:Clone().Parent = handle
                 end
             end
         end
@@ -624,7 +639,6 @@ local function applyknife(char, tool, skin)
             track:Destroy()
         end)
     end
-
     if skincfg.soundid and skincfg.soundid ~= "" then
         local snd = Instance.new("Sound")
         snd.SoundId = skincfg.soundid
@@ -946,7 +960,7 @@ local function doWallJump()
 end
 
 -- 
---  MOVEMENT MODS (Speed + Jump Power)
+--  MOVEMENT MODS (Speed + Jump Power) - Fixed
 -- 
 local defaultSpeed     = nil
 local defaultJumpPower = nil
@@ -956,21 +970,28 @@ RunService.RenderStepped:Connect(function()
     local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
     if not defaultSpeed     then defaultSpeed     = hum.WalkSpeed end
     if not defaultJumpPower then defaultJumpPower = hum.JumpPower end
-    local mc = moveCfg()
-    local sc = mc['Speed Modifications'] or {}
-    local jc = jumpCfg()
-    if State.SpeedActive and sc['Enabled'] then
-        hum.WalkSpeed = sc['Value'] or 32
-    else
-        if not State.SpeedActive and defaultSpeed then
-            hum.WalkSpeed = defaultSpeed
+    
+    -- Speed - Fixed to use correct config structure
+    if C['Player Modification'] and C['Player Modification']['Movement'] and C['Player Modification']['Movement']['Speed Modifications'] then
+        local speedCfg = C['Player Modification']['Movement']['Speed Modifications']
+        if State.SpeedActive and speedCfg['Enabled'] then
+            hum.WalkSpeed = 16 * (speedCfg['Multiplier'] or 1.5)
+        else
+            if not State.SpeedActive and defaultSpeed then
+                hum.WalkSpeed = defaultSpeed
+            end
         end
     end
-    if State.JumpActive and jc['Enabled'] then
-        hum.JumpPower = jc['Value'] or 100
-    else
-        if not State.JumpActive and defaultJumpPower then
-            hum.JumpPower = defaultJumpPower
+    
+    -- Jump Power - Fixed to use correct config structure
+    if C['Player Modification'] and C['Player Modification']['Movement'] and C['Player Modification']['Movement']['Jump Modifications'] then
+        local jumpCfg = C['Player Modification']['Movement']['Jump Modifications']
+        if State.JumpActive and jumpCfg['Enabled'] then
+            hum.JumpPower = jumpCfg['Value'] or 50
+        else
+            if not State.JumpActive and defaultJumpPower then
+                hum.JumpPower = defaultJumpPower
+            end
         end
     end
 end)
