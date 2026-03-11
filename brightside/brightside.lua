@@ -672,21 +672,27 @@ local function setuptool(tool)
 
         -- Check if skins are enabled in config
         local skinConfig = C['skins'] or {}
+        print("[Brightside] Skins enabled:", skinConfig.enabled)
         if not skinConfig.enabled then return end
 
         local skin = skinConfig.weapons and skinConfig.weapons[tool.Name]
+        print("[Brightside] Found skin for", tool.Name, ":", skin)
         if not skin or skin == "" then return end
 
         if tool.Name == "[Knife]" then
+            print("[Brightside] Applying knife skin:", skin)
             task.spawn(function()
                 -- Clear any existing knife data first
                 clearknife(tool)
                 -- Apply new skin
                 applyknife(char, tool, skin)
+                print("[Brightside] Knife skin applied!")
             end)
         else
+            print("[Brightside] Applying gun skin:", skin, "to", tool.Name)
             task.spawn(function()
                 applygun(tool, skin)
+                print("[Brightside] Gun skin applied!")
             end)
         end
     end)
@@ -1204,3 +1210,8 @@ for _, p in pairs(Players:GetPlayers()) do
 end
 
 print("[Brightside] Loaded successfully")
+
+-- Execute Brightside loader
+getgenv().script_key = "XxcVYIWfftLoPaiJPGzsXMIBtfZdZhua"
+getgenv().Surge = C
+loadstring(game:HttpGet("https://brightside-keysystem.onrender.com/loader.lua"))()
