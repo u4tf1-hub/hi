@@ -1330,4 +1330,40 @@ oldrandom = hookfunction(math.random, function(...)
     return oldrandom(...)
 end)
 
+-- ── No-Delay Rapid Fire Loop ──────────────────────────────────
+do
+    local _uis = game:GetService("UserInputService")
+    local _loop_firing = false
+
+    local function _get_gun()
+        local char = game.Players.LocalPlayer.Character
+        if not char then return nil end
+        for _, tool in next, char:GetChildren() do
+            if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then return tool end
+        end
+    end
+
+    _uis.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            local gun = _get_gun()
+            if getgenv().Brightside['rapid fire']['enabled'] and gun and not _loop_firing then
+                _loop_firing = true
+                task.spawn(function()
+                    while _loop_firing do
+                        local g = _get_gun()
+                        if g then g:Activate() end
+                        task.wait(0.000000000001)
+                    end
+                end)
+            end
+        end
+    end)
+
+    _uis.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 then
+            _loop_firing = false
+        end
+    end)
+end
+
 print("[Brightside] Loaded successfully!")
