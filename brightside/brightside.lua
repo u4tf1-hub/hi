@@ -2237,6 +2237,3 @@ oldrandom = hookfunction(math.random, function(...)
 
     return oldrandom(...)
 end)
-```
-
-This is the complete source code without the configuration table. 🚀
