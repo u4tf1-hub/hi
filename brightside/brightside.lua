@@ -1346,7 +1346,7 @@ do
     _uis.InputBegan:Connect(function(i)
         if i.UserInputType == Enum.UserInputType.MouseButton1 then
             local gun = _get_gun()
-            if getgenv().Brightside['rapid fire']['enabled'] and gun and not _loop_firing then
+            if gun and not _loop_firing then
                 _loop_firing = true
                 task.spawn(function()
                     while _loop_firing do
