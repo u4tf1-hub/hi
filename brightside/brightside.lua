@@ -1,3 +1,20 @@
+
+-- Set global variables for compatibility
+getgenv().Surge = getgenv().Brightside
+getgenv().wizprivate = getgenv().Brightside
+
+print("✅ Brightside configuration loaded!")
+print("🎯 All features ready!")
+
+-- Wait for config to be fully loaded
+if not getgenv().Brightside then
+    error("Brightside configuration not found! Make sure the config is loaded before the script.")
+end
+
+-- Execute Brightside loader (commented out to prevent config overwrite)
+-- getgenv().script_key = "XxcVYIWfftLoPaiJPGzsXMIBtfZdZhua"
+-- loadstring(game:HttpGet("https://brightside-keysystem.onrender.com/loader.lua"))()
+
 -- services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -24,8 +41,8 @@ local camLockActive = false
 -- target line drawing
 local targetline = Drawing.new("Line")
 targetline.Visible      = false
-targetline.Thickness    = getgenv().wizprivate and getgenv().wizprivate['Silent Aimbot']['Target Line']['thickness'] or 2.5
-targetline.Transparency = getgenv().wizprivate and getgenv().wizprivate['Silent Aimbot']['Target Line']['transparency'] or 0
+targetline.Thickness    = getgenv().Brightside and getgenv().Brightside['Silent Aimbot']['Target Line']['thickness'] or 2.5
+targetline.Transparency = getgenv().Brightside and getgenv().Brightside['Silent Aimbot']['Target Line']['transparency'] or 0
 targetline.ZIndex       = 999
 local camLockHold = false
 local camLockTarget = nil
@@ -60,7 +77,7 @@ task.spawn(function()
     local CommunityID = 17215700  
 
     local function checkMod(Player)
-        if getgenv().wizprivate and getgenv().wizprivate.Global and getgenv().wizprivate.Global["Mod Detector"] then
+        if getgenv().Brightside and getgenv().Brightside.Global and getgenv().Brightside.Global["Mod Detector"] then
             if Player ~= LocalPlayer and Player:IsInGroup(CommunityID) then
                 LocalPlayer:Kick("A moderator has joined the game!")
                 return true
@@ -99,7 +116,7 @@ end
 
 -- get triggerbot delay based on weapon
 local function getTriggerbotDelay()
-    local cfg = getgenv().wizprivate['Trigger Bot']['Delay Settings']
+    local cfg = getgenv().Brightside['Trigger Bot']['Delay Settings']
     if not cfg['Delay Toggle'] then return 0 end
 
     local defaultDelay = cfg['Delay'] or 0.095
@@ -113,9 +130,9 @@ end
 
 -- get range-based smoothness
 local function getCameraSmoothness(distance)
-    local cfg = getgenv().wizprivate['Camera Aimbot']['Range Smoothing']
+    local cfg = getgenv().Brightside['Camera Aimbot']['Range Smoothing']
     if not cfg.Enabled then
-        return getgenv().wizprivate['Camera Aimbot']['Smoothing'].X, getgenv().wizprivate['Camera Aimbot']['Smoothing'].Y
+        return getgenv().Brightside['Camera Aimbot']['Smoothing'].X, getgenv().Brightside['Camera Aimbot']['Smoothing'].Y
     end
 
     if distance <= 30 then
@@ -129,7 +146,7 @@ end
 
 -- get fov config for silent or trigger (FIXED)
 local function getSplitFOV(section)
-    local fovData = getgenv().wizprivate[section].FOV
+    local fovData = getgenv().Brightside[section].FOV
     local size = fovData.Size or fovData -- Handle both structures
 
     local cfg = {
@@ -159,8 +176,8 @@ local function updateTargetVisuals()
     if now - lastVisualUpdate < VISUAL_UPDATE_RATE then return end
     lastVisualUpdate = now
 
-    local showSilent = getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV']
-    local showTrigger = getgenv().wizprivate['Trigger Bot'].FOV['Show FOV']
+    local showSilent = getgenv().Brightside['Silent Aimbot'].FOV['Show FOV']
+    local showTrigger = getgenv().Brightside['Trigger Bot'].FOV['Show FOV']
 
     if currentTargetPlayer ~= targetPlayer then
         pcall(function()
@@ -249,7 +266,7 @@ local function updateTargetVisuals()
             targetCache.Trigger.Parent = Workspace
         end
 
-        local pred = getgenv().wizprivate['Trigger Bot'].Prediction
+        local pred = getgenv().Brightside['Trigger Bot'].Prediction
         local predPos = root.Position
         if root.Velocity.Magnitude > 1 then
             predPos = predPos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
@@ -310,12 +327,12 @@ local function isMouseInBoxFOV(hitbox)
 end
 
 local function isMouseInSilentFOV()
-    if not getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV'] then return true end
+    if not getgenv().Brightside['Silent Aimbot'].FOV['Show FOV'] then return true end
     return targetCache.Hitbox and isMouseInBoxFOV(targetCache.Hitbox)
 end
 
 local function isMouseInTriggerFOV()
-    if not getgenv().wizprivate['Trigger Bot'].FOV['Show FOV'] then return true end
+    if not getgenv().Brightside['Trigger Bot'].FOV['Show FOV'] then return true end
     return targetCache.Trigger and isMouseInBoxFOV(targetCache.Trigger)
 end
 
@@ -354,7 +371,7 @@ end
 
 -- visible check (MOVED OUTSIDE RenderStepped)
 local function isVisible(origin, targetPart, targetCharacter)
-    if not getgenv().wizprivate.Checks['Visible Check'] then return true end
+    if not getgenv().Brightside.Checks['Visible Check'] then return true end
     if not (targetPart and targetPart:IsA("BasePart")) then return false end
     local direction = (targetPart.Position - origin)
     local rayParams = RaycastParams.new()
@@ -367,7 +384,7 @@ end
 
 -- crew check
 local function isSameCrew(target)
-    if not getgenv().wizprivate.Checks['Crew Check'] then return false end
+    if not getgenv().Brightside.Checks['Crew Check'] then return false end
     local localCrew = localPlayer:GetAttribute("CrewID")
     local targetCrew = target:GetAttribute("CrewID")
     return localCrew and targetCrew and localCrew == targetCrew
@@ -411,8 +428,8 @@ local function getClosestPoint(character, isCamlock)
     local cam = camera
     local ray = cam:ViewportPointToRay(mouseX, mouseY)
 
-    local cfg = isCamlock and getgenv().wizprivate['Camera Aimbot']['Closest Point'] 
-                           or getgenv().wizprivate['Silent Aimbot']['Closest Point']
+    local cfg = isCamlock and getgenv().Brightside['Camera Aimbot']['Closest Point'] 
+                           or getgenv().Brightside['Silent Aimbot']['Closest Point']
     local mode = cfg.Mode or "Advanced"
     local scale = cfg['Scale'] or 0.17
     local density = cfg['Density'] or 4
@@ -492,10 +509,10 @@ end
 -- get hitpart for silent aimbot
 local function getClosestBodyPart(character)
     if not character then return nil end
-    if getgenv().wizprivate['Silent Aimbot'].HitPart == "Closest Point" then
+    if getgenv().Brightside['Silent Aimbot'].HitPart == "Closest Point" then
         return getClosestPoint(character, false)
     end
-    local part = character:FindFirstChild(getgenv().wizprivate['Silent Aimbot'].HitPart)
+    local part = character:FindFirstChild(getgenv().Brightside['Silent Aimbot'].HitPart)
     if part and part:IsA("BasePart") then
         return { Part = part, Position = part.Position }
     end
@@ -505,10 +522,10 @@ end
 -- get hitpart for camera aimbot
 local function getCamlockBodyPart(character)
     if not character then return nil end
-    if getgenv().wizprivate['Camera Aimbot'].HitPart == "Closest Point" then
+    if getgenv().Brightside['Camera Aimbot'].HitPart == "Closest Point" then
         return getClosestPoint(character, true)
     end
-    local part = character:FindFirstChild(getgenv().wizprivate['Camera Aimbot'].HitPart)
+    local part = character:FindFirstChild(getgenv().Brightside['Camera Aimbot'].HitPart)
     if part and part:IsA("BasePart") then
         return { Part = part, Position = part.Position }
     end
@@ -542,7 +559,7 @@ local function withindistance(part, distcfg)
 end
 
 local function updatetargetline()
-    local cfg = getgenv().wizprivate['Silent Aimbot']['Target Line']
+    local cfg = getgenv().Brightside['Silent Aimbot']['Target Line']
     if not cfg['enabled'] then
         targetline.Visible = false
         return
@@ -602,13 +619,13 @@ local function getBestTarget()
         local ff = char:FindFirstChildOfClass("ForceField")
 
         local pass = true
-        if getgenv().wizprivate.Checks['Knock Check'] and ko and ko.Value then pass = false end
-        if getgenv().wizprivate.Checks['Forcefield Check'] and ff then pass = false end
-        if getgenv().wizprivate.Checks['Crew Check'] and isSameCrew(player) then pass = false end
+        if getgenv().Brightside.Checks['Knock Check'] and ko and ko.Value then pass = false end
+        if getgenv().Brightside.Checks['Forcefield Check'] and ff then pass = false end
+        if getgenv().Brightside.Checks['Crew Check'] and isSameCrew(player) then pass = false end
         if not pass then continue end
 
         -- Visible check (optional)
-        if getgenv().wizprivate.Checks['Visible Check'] then
+        if getgenv().Brightside.Checks['Visible Check'] then
             if not isVisible(cam.CFrame.Position, head, char) then continue end
         end
 
@@ -936,8 +953,8 @@ local function clearTargetIfInvalid()
     local ff = char:FindFirstChildOfClass("ForceField")
 
     local invalid = not root
-                 or (getgenv().wizprivate.Checks['Forcefield Check'] and ff)
-                 or (getgenv().wizprivate.Checks['Crew Check'] and isSameCrew(targetPlayer))
+                 or (getgenv().Brightside.Checks['Forcefield Check'] and ff)
+                 or (getgenv().Brightside.Checks['Crew Check'] and isSameCrew(targetPlayer))
 
     if invalid then
         targetPlayer = nil
@@ -960,7 +977,7 @@ end
 -- esp
 local function addesp(player)
     if player == localPlayer then return end
-    if not getgenv().wizprivate['esp']['enabled'] then return end
+    if not getgenv().Brightside['esp']['enabled'] then return end
 
     local esp = {
         player = player,
@@ -971,7 +988,7 @@ local function addesp(player)
     esp.nametag.Center = true
     esp.nametag.Outline = true
     esp.nametag.OutlineColor = Color3.fromRGB(0, 0, 0)
-    esp.nametag.Color = getgenv().wizprivate['esp']['color']
+    esp.nametag.Color = getgenv().Brightside['esp']['color']
     esp.nametag.Font = Drawing.Fonts.Plex
     esp.nametag.Visible = false
     esp.nametag.ZIndex = 1000
@@ -988,7 +1005,7 @@ local function removeesp(player)
 end
 
 local function refreshesp()
-    if not getgenv().wizprivate['esp']['enabled'] then
+    if not getgenv().Brightside['esp']['enabled'] then
         for userid, esp in pairs(esplabels) do
             esp.nametag:Remove()
             esplabels[userid] = nil
@@ -1016,7 +1033,7 @@ local function refreshesp()
             local hrp = player.Character.HumanoidRootPart
 
             local worldpos
-            if getgenv().wizprivate['esp']['name above'] then
+            if getgenv().Brightside['esp']['name above'] then
                 worldpos = head.Position + Vector3.new(0, 1.5, 0)
             else
                 worldpos = hrp.Position - Vector3.new(0, 2.8, 0)
@@ -1031,16 +1048,16 @@ local function refreshesp()
                     esp.nametag.Position = newpos
                 end
 
-                if getgenv().wizprivate['esp']['use display name'] then
+                if getgenv().Brightside['esp']['use display name'] then
                     esp.nametag.Text = player.DisplayName
                 else
                     esp.nametag.Text = player.Name
                 end
 
                 if targetPlayer and targetPlayer.Character and player.Character == targetPlayer.Character then
-                    esp.nametag.Color = getgenv().wizprivate['esp']['target color']
+                    esp.nametag.Color = getgenv().Brightside['esp']['target color']
                 else
-                    esp.nametag.Color = getgenv().wizprivate['esp']['color']
+                    esp.nametag.Color = getgenv().Brightside['esp']['color']
                 end
 
                 esp.nametag.Visible = true
@@ -1387,12 +1404,12 @@ local function setuptool(tool)
     toolregistry[tool] = true
 
     tool.Equipped:Connect(function()
-        if not getgenv().wizprivate['skins']['enabled'] then return end
+        if not getgenv().Brightside['skins']['enabled'] then return end
 
         local char = tool.Parent
         if char ~= localPlayer.Character then return end
 
-        local skin = getgenv().wizprivate['skins']['weapons'][tool.Name]
+        local skin = getgenv().Brightside['skins']['weapons'][tool.Name]
         if not skin or skin == "" then return end
 
         if tool.Name == "[Knife]" then
@@ -1423,7 +1440,7 @@ local function setuptool(tool)
                 local children = mesh:GetChildren()
                 for i = 1, #children do
                     local v = children[i]
-                    if v.Name == "Handle.R" or v:IsA("Model") or (v:IsA("MeshPart") and v.Name ~= "Default") then
+                    if v.Name == "Handle.R" or v:IsA("Model") or (v:IsA("BasePart") and v.Name ~= "Default") then
                         v:Destroy()
                     end
                 end
@@ -1433,9 +1450,9 @@ local function setuptool(tool)
     end)
 
     if tool.Parent == localPlayer.Character then
-        if not getgenv().wizprivate['skins']['enabled'] then return end
+        if not getgenv().Brightside['skins']['enabled'] then return end
 
-        local skin = getgenv().wizprivate['skins']['weapons'][tool.Name]
+        local skin = getgenv().Brightside['skins']['weapons'][tool.Name]
         if skin and skin ~= "" then
             if tool.Name == "[Knife]" then
                 task.spawn(function()
@@ -1503,27 +1520,27 @@ end
 local function oncharrapidfire(char)
     isfiring = false
     char.ChildAdded:Connect(function(tool)
-        if tool:IsA("Tool") and getgenv().wizprivate['rapid fire']['enabled'] then
+        if tool:IsA("Tool") and getgenv().Brightside['rapid fire']['enabled'] then
             patchtool(tool)
         end
     end)
 end
 
 local function rapidfire()
-    if not getgenv().wizprivate['rapid fire']['enabled'] then
+    if not getgenv().Brightside['rapid fire']['enabled'] then
         isfiring = false
         return
     end
 
     if not isfiring then return end
-    if tick() - lastrapidfire < getgenv().wizprivate['rapid fire']['delay'] then return end
+    if tick() - lastrapidfire < getgenv().Brightside['rapid fire']['delay'] then return end
 
     local gun = getrapidgun()
     if not gun then return end
 
-    if getgenv().wizprivate['rapid fire']['specific weapons']['enabled'] then
+    if getgenv().Brightside['rapid fire']['specific weapons']['enabled'] then
         local valid = false
-        for _, wname in pairs(getgenv().wizprivate['rapid fire']['specific weapons']['weapons']) do
+        for _, wname in pairs(getgenv().Brightside['rapid fire']['specific weapons']['weapons']) do
             local clean = wname:gsub("%[", ""):gsub("%]", "")
             if gun.Name == wname or gun.Name:find(clean) then
                 valid = true
@@ -1607,7 +1624,7 @@ RunService.RenderStepped:Connect(function()
     local gun = getEquippedGun()
 
     -- infinite ammo: pin Ammo to 30 every single frame, no threshold logic
-    if infammoenabled and getgenv().wizprivate['inf ammo']['enabled'] then
+    if infammoenabled and getgenv().Brightside['inf ammo']['enabled'] then
         if gun then
             local ammo = gun:FindFirstChild("Ammo")
             if ammo then
@@ -1617,37 +1634,37 @@ RunService.RenderStepped:Connect(function()
     end
 
     -- no cooldown: nuke all cooldown upvalues every frame so they can never accumulate
-    if nocooldownenabled and getgenv().wizprivate['no cooldown']['enabled'] then
+    if nocooldownenabled and getgenv().Brightside['no cooldown']['enabled'] then
         if gun then
             nukeToolCooldowns(gun)
         end
     end
 
-    if superjumpenabled and getgenv().wizprivate['super jump']['enabled'] then
+    if superjumpenabled and getgenv().Brightside['super jump']['enabled'] then
         local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
         if hum then
-            if hum.JumpPower ~= getgenv().wizprivate['super jump']['jump power'] then
-                hum.JumpPower = getgenv().wizprivate['super jump']['jump power']
+            if hum.JumpPower ~= getgenv().Brightside['super jump']['jump power'] then
+                hum.JumpPower = getgenv().Brightside['super jump']['jump power']
             end
         end
     end
 
-    if getgenv().wizprivate['Speed Modifications']['Enabled'] and speedenabled then
+    if getgenv().Brightside['Speed Modifications']['Enabled'] and speedenabled then
         local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
         if hum then
-            hum.WalkSpeed = 16 * getgenv().wizprivate['Speed Modifications']['Normal']['Multiplier']
+            hum.WalkSpeed = 16 * getgenv().Brightside['Speed Modifications']['Normal']['Multiplier']
         end
     end
 
-    if getgenv().wizprivate['hitbox expander']['enabled'] then
+    if getgenv().Brightside['hitbox expander']['enabled'] then
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= localPlayer and player.Character then
                 local hrp = player.Character:FindFirstChild("HumanoidRootPart")
                 if hrp then
                     hrp.Size = Vector3.new(
-                        getgenv().wizprivate['hitbox expander']['size'],
-                        getgenv().wizprivate['hitbox expander']['size'],
-                        getgenv().wizprivate['hitbox expander']['size']
+                        getgenv().Brightside['hitbox expander']['size'],
+                        getgenv().Brightside['hitbox expander']['size'],
+                        getgenv().Brightside['hitbox expander']['size']
                     )
                     hrp.Transparency = 1
                 end
@@ -1667,11 +1684,11 @@ local speedPressed = false
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     local key = input.KeyCode
-    local selectBind = getgenv().wizprivate["Binds"].Select
-    local camBind = getgenv().wizprivate["Binds"]["Camera Aimbot"]
-    local triggerBind = getgenv().wizprivate["Binds"].Triggerbot
-    local speedBind = getgenv().wizprivate["Binds"].Speed
-    local targetMode = getgenv().wizprivate['Targeting']['Target Mode']
+    local selectBind = getgenv().Brightside["Binds"].Select
+    local camBind = getgenv().Brightside["Binds"]["Camera Aimbot"]
+    local triggerBind = getgenv().Brightside["Binds"].Triggerbot
+    local speedBind = getgenv().Brightside["Binds"].Speed
+    local targetMode = getgenv().Brightside['Targeting']['Target Mode']
 
     if key == Enum.KeyCode.LeftControl then leftCtrlHeld = true return end
 
@@ -1700,7 +1717,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if key == Enum.KeyCode[camBind] then
         if not camPressed then
             camPressed = true
-            local mode = getgenv().wizprivate['Camera Aimbot'].Mode
+            local mode = getgenv().Brightside['Camera Aimbot'].Mode
             if mode == "Toggle" then
                 camLockActive = not camLockActive
                 if camLockActive then
@@ -1726,7 +1743,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if key == Enum.KeyCode[triggerBind] then
         if not triggerPressed then
             triggerPressed = true
-            local mode = getgenv().wizprivate['Trigger Bot'].Settings.Mode
+            local mode = getgenv().Brightside['Trigger Bot'].Settings.Mode
             if mode == "Toggle" then
                 triggerBotActive = not triggerBotActive
             elseif mode == "Hold" then
@@ -1738,33 +1755,33 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if key == Enum.KeyCode[speedBind] then
         if not speedPressed then
             speedPressed = true
-            if getgenv().wizprivate["Speed Modifications"]['Enabled'] then
+            if getgenv().Brightside["Speed Modifications"]['Enabled'] then
                 speedenabled = not speedenabled
             end
         end
     end
 
-    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['Super Jump']] then
-        if getgenv().wizprivate['super jump']['enabled'] then
+    if key == Enum.KeyCode[getgenv().Brightside["Binds"]['Super Jump']] then
+        if getgenv().Brightside['super jump']['enabled'] then
             superjumpenabled = not superjumpenabled
         end
     end
 
-    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['Inf Ammo']] then
-        if getgenv().wizprivate['inf ammo']['enabled'] then
+    if key == Enum.KeyCode[getgenv().Brightside["Binds"]['Inf Ammo']] then
+        if getgenv().Brightside['inf ammo']['enabled'] then
             infammoenabled = not infammoenabled
         end
     end
 
-    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['No Cooldown']] then
-        if getgenv().wizprivate['no cooldown']['enabled'] then
+    if key == Enum.KeyCode[getgenv().Brightside["Binds"]['No Cooldown']] then
+        if getgenv().Brightside['no cooldown']['enabled'] then
             nocooldownenabled = not nocooldownenabled
         end
     end
 
-    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['ESP']] then
-        getgenv().wizprivate['esp']['enabled'] = not getgenv().wizprivate['esp']['enabled']
-        if getgenv().wizprivate['esp']['enabled'] then
+    if key == Enum.KeyCode[getgenv().Brightside["Binds"]['ESP']] then
+        getgenv().Brightside['esp']['enabled'] = not getgenv().Brightside['esp']['enabled']
+        if getgenv().Brightside['esp']['enabled'] then
             for _, player in pairs(Players:GetPlayers()) do
                 if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
                     if not esplabels[player.UserId] then
@@ -1776,7 +1793,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if getgenv().wizprivate['rapid fire']['enabled'] then
+        if getgenv().Brightside['rapid fire']['enabled'] then
             local gun = getrapidgun()
             if gun then
                 isfiring = true
@@ -1801,8 +1818,8 @@ UserInputService.InputEnded:Connect(function(input)
         isfiring = false
     end
 
-    local camBind = getgenv().wizprivate["Binds"]["Camera Aimbot"]
-    local mode = getgenv().wizprivate['Camera Aimbot'].Mode
+    local camBind = getgenv().Brightside["Binds"]["Camera Aimbot"]
+    local mode = getgenv().Brightside['Camera Aimbot'].Mode
     if input.KeyCode == Enum.KeyCode[camBind] then
         camPressed = false
         if mode == "Hold" then
@@ -1813,25 +1830,25 @@ UserInputService.InputEnded:Connect(function(input)
         end
     end
 
-    if input.KeyCode == Enum.KeyCode[getgenv().wizprivate["Binds"].Triggerbot] then
-        if getgenv().wizprivate['Trigger Bot'].Settings.Mode == "Hold" then
+    if input.KeyCode == Enum.KeyCode[getgenv().Brightside["Binds"].Triggerbot] then
+        if getgenv().Brightside['Trigger Bot'].Settings.Mode == "Hold" then
             triggerHold = false
         end
         triggerPressed = false
     end
 
-    if input.KeyCode == Enum.KeyCode[getgenv().wizprivate["Binds"].Select] then
+    if input.KeyCode == Enum.KeyCode[getgenv().Brightside["Binds"].Select] then
         selectPressed = false
     end
 
-    if input.KeyCode == Enum.KeyCode[getgenv().wizprivate["Binds"].Speed] then
+    if input.KeyCode == Enum.KeyCode[getgenv().Brightside["Binds"].Speed] then
         speedPressed = false
     end
 end)
 
 -- main loop
 RunService.RenderStepped:Connect(function()
-    local mode = getgenv().wizprivate['Targeting']['Target Mode']
+    local mode = getgenv().Brightside['Targeting']['Target Mode']
 
     if mode == "Automatic" then
         local best = getBestTarget()
@@ -1865,8 +1882,8 @@ RunService.RenderStepped:Connect(function()
     local look = root.CFrame.LookVector
     local facing = CFrame.lookAt(Vector3.new(), Vector3.new(look.X, 0, look.Z))
 
-    local showSilent = getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV']
-    local showTrigger = getgenv().wizprivate['Trigger Bot'].FOV['Show FOV']
+    local showSilent = getgenv().Brightside['Silent Aimbot'].FOV['Show FOV']
+    local showTrigger = getgenv().Brightside['Trigger Bot'].FOV['Show FOV']
 
     local weaponCategory = getWeaponCategory()
     local silentFOV = getSplitFOV('Silent Aimbot')
@@ -1933,7 +1950,7 @@ RunService.RenderStepped:Connect(function()
             targetCache.Trigger.Parent = Workspace
         end
 
-        local pred = getgenv().wizprivate['Trigger Bot'].Prediction
+        local pred = getgenv().Brightside['Trigger Bot'].Prediction
         local predPos = root.Position
         if root.Velocity.Magnitude > 1 then
             predPos = predPos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
@@ -1970,14 +1987,14 @@ RunService.RenderStepped:Connect(function()
     applySilentFOV()
     applyTriggerFOV()
 
-    if getgenv().wizprivate['Trigger Bot'].Enabled and not leftCtrlHeld then
+    if getgenv().Brightside['Trigger Bot'].Enabled and not leftCtrlHeld then
         -- don't shoot while target is knocked — wait for them to get back up
-        local targetKnocked = getgenv().wizprivate.Checks['Knock Check'] and isTargetKnocked(targetPlayer)
+        local targetKnocked = getgenv().Brightside.Checks['Knock Check'] and isTargetKnocked(targetPlayer)
         if not targetKnocked then
-        local cfg = getgenv().wizprivate['Trigger Bot'].Settings
+        local cfg = getgenv().Brightside['Trigger Bot'].Settings
         local isSelectMode = (mode == "Select")
-        local forceTrigger = isSelectMode and getgenv().wizprivate['Select Only Features']['Force Trigger']
-        local forceHit = isSelectMode and getgenv().wizprivate['Select Only Features']['Force Hit']
+        local forceTrigger = isSelectMode and getgenv().Brightside['Select Only Features']['Force Trigger']
+        local forceHit = isSelectMode and getgenv().Brightside['Select Only Features']['Force Hit']
 
         local active = forceTrigger or (cfg.Mode == "Always") or (cfg.Mode == "Hold" and triggerHold) or (cfg.Mode == "Toggle" and triggerBotActive)
         if active then
@@ -2001,7 +2018,7 @@ RunService.RenderStepped:Connect(function()
                 end
 
                 if hitData and hitData.Part then
-                    local visible = not getgenv().wizprivate.Checks['Visible Check'] or 
+                    local visible = not getgenv().Brightside.Checks['Visible Check'] or 
                                    isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character)
                     if visible then
                         triggerbot()
@@ -2020,7 +2037,7 @@ end)
 -- camera aimbot
 local camFOVCircle = nil
 RunService.Heartbeat:Connect(function(dt)
-    local camcfg = getgenv().wizprivate['Camera Aimbot']
+    local camcfg = getgenv().Brightside['Camera Aimbot']
     if not (camcfg.Enabled and camLockActive and camLockTarget and camLockTarget.Character) then 
         if camFOVCircle then camFOVCircle:Remove() camFOVCircle = nil end
         return 
@@ -2031,7 +2048,7 @@ RunService.Heartbeat:Connect(function(dt)
     local root = camLockTarget.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    if getgenv().wizprivate.Checks["Self Knock Check"] and isSelfKnocked() then return end
+    if getgenv().Brightside.Checks["Self Knock Check"] and isSelfKnocked() then return end
 
     local zoom = (camera.CFrame.Position - camera.Focus.Position).Magnitude
     local isFP = zoom < 1
@@ -2109,21 +2126,21 @@ end)
 -- silent aimbot
 local originalIndex
 originalIndex = hookmetamethod(game, "__index", function(t, k)
-    if not (getgenv().wizprivate['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
+    if not (getgenv().Brightside['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
         return originalIndex(t, k)
     end
 
     -- keep target locked but don't redirect bullets while they're knocked
-    if getgenv().wizprivate.Checks['Knock Check'] and isTargetKnocked(targetPlayer) then
+    if getgenv().Brightside.Checks['Knock Check'] and isTargetKnocked(targetPlayer) then
         return originalIndex(t, k)
     end
 
-    local targetMode = getgenv().wizprivate['Targeting']['Target Mode']
+    local targetMode = getgenv().Brightside['Targeting']['Target Mode']
     local isSelectMode = targetMode == "Select"
-    local forceHit = isSelectMode and getgenv().wizprivate['Select Only Features']['Force Hit']
+    local forceHit = isSelectMode and getgenv().Brightside['Select Only Features']['Force Hit']
 
     local shouldCheckFOV = not forceHit
-    local inFOV = not getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV'] or isMouseInSilentFOV()
+    local inFOV = not getgenv().Brightside['Silent Aimbot'].FOV['Show FOV'] or isMouseInSilentFOV()
     local alwaysHit = forceHit or (shouldCheckFOV and inFOV)
 
     if not alwaysHit then return originalIndex(t, k) end
@@ -2146,7 +2163,7 @@ originalIndex = hookmetamethod(game, "__index", function(t, k)
         return originalIndex(t, k)
     end
 
-    local antiCurve = getgenv().wizprivate["Anti Curve"]
+    local antiCurve = getgenv().Brightside["Anti Curve"]
     if antiCurve.Enabled then
         local cameraDir = camera.CFrame.LookVector
         local toTarget = (hitData.Position - camera.CFrame.Position).Unit
@@ -2172,7 +2189,7 @@ originalIndex = hookmetamethod(game, "__index", function(t, k)
 
     if k == "Hit" then
         local pos = hitData.Position
-        local pred = getgenv().wizprivate['Silent Aimbot'].Prediction
+        local pred = getgenv().Brightside['Silent Aimbot'].Prediction
         local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
         if root and (pred.X ~= 0 or pred.Y ~= 0 or pred.Z ~= 0) then
             pos = pos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
@@ -2194,14 +2211,14 @@ oldrandom = hookfunction(math.random, function(...)
     end
 
     if (#args == 0) or (args[1] == -0.05 and args[2] == 0.05) or (args[1] == -0.1) or (args[1] == -0.05) then
-        if getgenv().wizprivate['spread modifications']['enabled'] then
-            if getgenv().wizprivate['spread modifications']['specific weapons']['enabled'] then
+        if getgenv().Brightside['spread modifications']['enabled'] then
+            if getgenv().Brightside['spread modifications']['specific weapons']['enabled'] then
                 local tool = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
                 if tool then
                     local wname = tool.Name
                     local found = false
 
-                    for _, weapon in pairs(getgenv().wizprivate['spread modifications']['specific weapons']['weapons']) do
+                    for _, weapon in pairs(getgenv().Brightside['spread modifications']['specific weapons']['weapons']) do
                         if wname == weapon then
                             found = true
                             break
@@ -2209,14 +2226,17 @@ oldrandom = hookfunction(math.random, function(...)
                     end
 
                     if found then
-                        return oldrandom(...) * (getgenv().wizprivate['spread modifications']['amount'] / 100)
+                        return oldrandom(...) * (getgenv().Brightside['spread modifications']['amount'] / 100)
                     end
                 end
             else
-                return oldrandom(...) * (getgenv().wizprivate['spread modifications']['amount'] / 100)
+                return oldrandom(...) * (getgenv().Brightside['spread modifications']['amount'] / 100)
             end
         end
     end
 
     return oldrandom(...)
 end)
+```
+
+This is the complete source code without the configuration table. 🚀
