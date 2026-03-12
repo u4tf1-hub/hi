@@ -1,3 +1,3 @@
 # hi           
 
-i hate skid ass niggas
+# failed project :(
