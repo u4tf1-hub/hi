@@ -1039,6 +1039,7 @@ local function clearKnife(tool)
                 if s and s.Parent then s:Destroy() end
             end
         end
+        data.applying = false
     end
 
     local mesh = tool:FindFirstChild("Default")
@@ -1064,8 +1065,14 @@ local function applyKnife(char, tool, skin)
     local rhand = char:FindFirstChild("RightHand")
     if not hum or not rhand then return end
 
+    -- Check if knife animation is already playing
+    local existingData = KnifeData[tool]
+    if existingData and existingData.track and existingData.track.IsPlaying then
+        return -- Don't interrupt existing animation
+    end
+
     clearKnife(tool)
-    KnifeData[tool] = {track = nil, welds = {}, sounds = {}}
+    KnifeData[tool] = {track = nil, welds = {}, sounds = {}, applying = true}
     local data = KnifeData[tool]
 
     local mesh = tool:FindFirstChild("Default")
@@ -1163,6 +1170,7 @@ local function applyKnife(char, tool, skin)
         track.Ended:Once(function()
             if data.track == track then
                 data.track = nil
+                data.applying = false
             end
             track:Destroy()
         end)
@@ -1768,6 +1776,52 @@ OriginalIndex = hookmetamethod(game, "__index", function(t, k)
     end
 
     return OriginalIndex(t, k)
+end)
+
+-- Panic Ground Feature
+local function panicGround()
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local hum = char:FindFirstChild("Humanoid")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then return end
+    
+    local panicConfig = getSetting({'Panic Ground'}, {})
+    if not panicConfig.Enabled then return end
+    
+    if panicConfig.Mode == 'Instant' then
+        -- Instant ground slam
+        root.CFrame = CFrame.new(root.Position.X, 0, root.Position.Z)
+        if panicConfig.PreserveVelocity then
+            hum:Move(root.CFrame.Position + Vector3.new(0, 0.1, 0))
+        end
+    else
+        -- Smooth ground slam
+        local targetY = 0
+        local currentY = root.Position.Y
+        local speed = panicConfig.SmoothSpeed or 400
+        
+        local tween = TweenService:Create(root, TweenInfo.new(
+            (currentY - targetY) / speed,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ), {CFrame = CFrame.new(root.Position.X, targetY, root.Position.Z)})
+        
+        tween:Play()
+    end
+end
+
+-- Input handling for Panic Ground
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    local panicConfig = getSetting({'Panic Ground'}, {})
+    if not panicConfig.Enabled then return end
+    
+    if input.KeyCode == Enum.KeyCode[panicConfig.Key] then
+        panicGround()
+    end
 end)
 
 print("🚀 Brightside Complete Script Loaded!")
