@@ -1,70 +1,51 @@
--- ════════════════════════════════════════════════════════════
---  BRIGHTSIDE COMPLETE SCRIPT
---  
--- ════════════════════════════════════════════════════════════
-
+-- services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
-local TweenService = game:GetService("TweenService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+local mouse = localPlayer:GetMouse()
 
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
-local Mouse = LocalPlayer:GetMouse()
-
--- Configuration Access
-local C = getgenv().Surge or {}
-local function getSetting(path, default)
-    local current = C
-    for i = 1, #path do
-        if type(current) ~= "table" then return default end
-        current = current[path[i]]
-        if current == nil then return default end
-    end
-    return current
-end
-
--- States
-local ESPLabels = {}
-local TriggerBotActive = false
-local TriggerHold = false
-local LastTriggerTime = 0
-local LastCamUpdate = 0
+-- states
+local esplabels = {}
+local triggerBotActive = false
+local triggerHold = false
+local lastTriggerTime = 0
+local lastCamUpdate = 0
 local CAM_UPDATE_RATE = 1/60
-local LastVisualUpdate = 0
+local lastVisualUpdate = 0
 local VISUAL_UPDATE_RATE = 1/60
-local CurrentTargetPlayer = nil
-local LeftCtrlHeld = false
-local TargetPlayer = nil
-local CamLockActive = false
-local CamLockHold = false
-local CamLockTarget = nil
-local CamLockPart = nil
-local RightClickHeld = false
+local currentTargetPlayer = nil
+local leftCtrlHeld = false
+local targetPlayer = nil
+local camLockActive = false
 
--- Target Line Drawing
-local TargetLine = Drawing.new("Line")
-TargetLine.Visible = false
-TargetLine.Thickness = getSetting({'Silent Aimbot', 'Target Line', 'thickness'}, 2.5)
-TargetLine.Transparency = getSetting({'Silent Aimbot', 'Target Line', 'transparency'}, 0)
-TargetLine.ZIndex = 999
+-- target line drawing
+local targetline = Drawing.new("Line")
+targetline.Visible      = false
+targetline.Thickness    = getgenv().wizprivate and getgenv().wizprivate['Silent Aimbot']['Target Line']['thickness'] or 2.5
+targetline.Transparency = getgenv().wizprivate and getgenv().wizprivate['Silent Aimbot']['Target Line']['transparency'] or 0
+targetline.ZIndex       = 999
+local camLockHold = false
+local camLockTarget = nil
+local camLockPart = nil
+local rightClickHeld = false
 
--- Weapon Categories
+-- weapon names
 local ShotgunNames = { ["Double-Barrel SG"]=true, ["TacticalShotgun"]=true, ["Shotgun"]=true, ["DrumShotgun"]=true }
 local PistolNames = { ["Revolver"]=true, ["Silencer"]=true, ["Glock"]=true }
 local AutomaticNames = { ["AK-47"]=true, ["AR"]=true, ["Silencer AR"]=true, ["Drum Gun"]=true }
 local RifleNames = { ["AUG"]=true, ["P90"]=true, ["Rifle"]=true }
 
--- Cache for visuals
-local TargetCache = {
+-- cache for visuals
+local targetCache = {
     Player = nil, Root = nil, Hitbox = nil, Box = nil,
     Trigger = nil, TriggerBox = nil,
     SilentFOV = {}, TriggerFOV = {}
 }
 
--- R15 Parts
+-- r15 parts
 local R15_PARTS = {
     "Head", "UpperTorso", "LowerTorso",
     "LeftUpperArm", "LeftLowerArm", "LeftHand",
@@ -73,11 +54,13 @@ local R15_PARTS = {
     "RightUpperLeg", "RightLowerLeg", "RightFoot"
 }
 
--- Mod Detector
 task.spawn(function()
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
     local CommunityID = 17215700  
+
     local function checkMod(Player)
-        if getSetting({'Global', 'Mod Detector'}, false) then
+        if getgenv().wizprivate and getgenv().wizprivate.Global and getgenv().wizprivate.Global["Mod Detector"] then
             if Player ~= LocalPlayer and Player:IsInGroup(CommunityID) then
                 LocalPlayer:Kick("A moderator has joined the game!")
                 return true
@@ -96,15 +79,15 @@ task.spawn(function()
     end)
 end)
 
--- Prediction Helper
+-- prediction helper
 local function applyPrediction(rootPart, predX, predY, predZ)
     local velocity = rootPart.Velocity
     return CFrame.new(rootPart.Position + Vector3.new(velocity.X * predX, velocity.Y * predY, velocity.Z * predZ))
 end
 
--- Get current weapon category
+-- get current weapon category
 local function getWeaponCategory()
-    local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    local tool = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
     if not tool then return "Others" end
     local name = tool.Name:gsub("[%[%]]", "")
     if ShotgunNames[name] then return "Shotguns"
@@ -114,86 +97,201 @@ local function getWeaponCategory()
     else return "Others" end
 end
 
--- Get triggerbot delay based on weapon
+-- get triggerbot delay based on weapon
 local function getTriggerbotDelay()
-    local cfg = getSetting({'Triggerbot', 'Timing'}, {})
-    if not cfg['Cooldown'] then return 0 end
-    return cfg['Cooldown']
+    local cfg = getgenv().wizprivate['Trigger Bot']['Delay Settings']
+    if not cfg['Delay Toggle'] then return 0 end
+
+    local defaultDelay = cfg['Delay'] or 0.095
+    local wc = cfg['Weapon Configuration']
+    if not wc or not wc.Enabled then return defaultDelay end
+
+    local category = getWeaponCategory()
+    local weaponCfg = wc[category] or wc.Others
+    return weaponCfg['Delay'] or defaultDelay
 end
 
--- Get range-based smoothness
+-- get range-based smoothness
 local function getCameraSmoothness(distance)
-    local cfg = getSetting({'Aim Assist', 'Smoothing'}, {})
-    return cfg['Smoothing Value'] and cfg['Smoothing Value'].X or 0.07, 
-           cfg['Smoothing Value'] and cfg['Smoothing Value'].Y or 0.07
+    local cfg = getgenv().wizprivate['Camera Aimbot']['Range Smoothing']
+    if not cfg.Enabled then
+        return getgenv().wizprivate['Camera Aimbot']['Smoothing'].X, getgenv().wizprivate['Camera Aimbot']['Smoothing'].Y
+    end
+
+    if distance <= 30 then
+        return cfg.Close.X, cfg.Close.Y
+    elseif distance <= 80 then
+        return cfg.Medium.X, cfg.Medium.Y
+    else
+        return cfg.Far.X, cfg.Far.Y
+    end
 end
 
--- Get FOV config for silent or trigger
+-- get fov config for silent or trigger (FIXED)
 local function getSplitFOV(section)
-    local fovData = getSetting({section, 'FOV'}, {})
-    local size = fovData['Box'] or fovData
+    local fovData = getgenv().wizprivate[section].FOV
+    local size = fovData.Size or fovData -- Handle both structures
 
     local cfg = {
-        xLeft  = size.X, xRight = size.X,
-        yUpper = size.Y, yLower = size.Y,
-        zLeft  = size.Z, zRight = size.Z
+        xLeft  = size["X Right"],  xRight = size["X Left"],
+        yUpper = size["Y Upper"], yLower = size["Y Lower"],
+        zLeft  = size["Z Right"],  zRight = size["Z Left"]
     }
+
+    local wc = fovData["Weapon Configuration"]
+    if wc and wc.Enabled then
+        local cat = getWeaponCategory()
+        local weaponCfg = wc[cat] or wc.Others
+        cfg.xLeft  = weaponCfg["X Right"]  or cfg.xLeft
+        cfg.xRight = weaponCfg["X Left"] or cfg.xRight
+        cfg.yUpper = weaponCfg["Y Upper"] or cfg.yUpper
+        cfg.yLower = weaponCfg["Y Lower"] or cfg.yLower
+        cfg.zLeft  = weaponCfg["Z Right"]  or cfg.zLeft
+        cfg.zRight = weaponCfg["Z Left"] or cfg.zRight
+    end
 
     return cfg
 end
 
--- Update visuals
+-- update visuals
 local function updateTargetVisuals()
     local now = tick()
-    if now - LastVisualUpdate < VISUAL_UPDATE_RATE then return end
-    LastVisualUpdate = now
+    if now - lastVisualUpdate < VISUAL_UPDATE_RATE then return end
+    lastVisualUpdate = now
 
-    local showSilent = getSetting({'Silent Aimbot', 'FOV', 'Visualize'}, false)
-    local showTrigger = getSetting({'Triggerbot', 'FOV', 'Visualize'}, false)
+    local showSilent = getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV']
+    local showTrigger = getgenv().wizprivate['Trigger Bot'].FOV['Show FOV']
 
-    if CurrentTargetPlayer ~= TargetPlayer then
+    if currentTargetPlayer ~= targetPlayer then
         pcall(function()
-            if TargetCache.Hitbox then TargetCache.Hitbox:Destroy() TargetCache.Hitbox = nil end
-            if TargetCache.Box then TargetCache.Box:Destroy() TargetCache.Box = nil end
-            if TargetCache.Trigger then TargetCache.Trigger:Destroy() TargetCache.Trigger = nil end
-            if TargetCache.TriggerBox then TargetCache.TriggerBox:Destroy() TargetCache.TriggerBox = nil end
+            if targetCache.Hitbox then targetCache.Hitbox:Destroy() targetCache.Hitbox = nil end
+            if targetCache.Box then targetCache.Box:Destroy() targetCache.Box = nil end
+            if targetCache.Trigger then targetCache.Trigger:Destroy() targetCache.Trigger = nil end
+            if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() targetCache.TriggerBox = nil end
         end)
-        CurrentTargetPlayer = TargetPlayer
+        currentTargetPlayer = targetPlayer
         return
     end
 
-    if not TargetPlayer or not TargetPlayer.Character then
+    if not targetPlayer or not targetPlayer.Character then
         pcall(function()
-            if TargetCache.Hitbox then TargetCache.Hitbox:Destroy() TargetCache.Hitbox = nil end
-            if TargetCache.Box then TargetCache.Box:Destroy() TargetCache.Box = nil end
-            if TargetCache.Trigger then TargetCache.Trigger:Destroy() TargetCache.Trigger = nil end
-            if TargetCache.TriggerBox then TargetCache.TriggerBox:Destroy() TargetCache.TriggerBox = nil end
+            if targetCache.Hitbox then targetCache.Hitbox:Destroy() targetCache.Hitbox = nil end
+            if targetCache.Box then targetCache.Box:Destroy() targetCache.Box = nil end
+            if targetCache.Trigger then targetCache.Trigger:Destroy() targetCache.Trigger = nil end
+            if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() targetCache.TriggerBox = nil end
         end)
         return
     end
 
-    local root = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    TargetCache.Root = root
+    targetCache.Root = root
 
-    local upperTorso = TargetPlayer.Character:FindFirstChild("UpperTorso")
+    local upperTorso = targetPlayer.Character:FindFirstChild("UpperTorso")
     local basePos = upperTorso and upperTorso.Position or root.Position
     local look = root.CFrame.LookVector
     local facing = CFrame.lookAt(Vector3.new(), Vector3.new(look.X, 0, look.Z))
 
     local silentFOV = getSplitFOV('Silent Aimbot')
-    local triggerFOV = getSplitFOV('Triggerbot')
-    TargetCache.SilentFOV = silentFOV
-    TargetCache.TriggerFOV = triggerFOV
+    local triggerFOV = getSplitFOV('Trigger Bot')
+    targetCache.SilentFOV = silentFOV
+    targetCache.TriggerFOV = triggerFOV
 
-    -- Visual implementation would go here for FOV boxes
+    if showSilent then
+        if not targetCache.Hitbox then
+            targetCache.Hitbox = Instance.new("Part")
+            targetCache.Hitbox.Name = "SilentHitbox_" .. targetPlayer.Name
+            targetCache.Hitbox.Anchored = true
+            targetCache.Hitbox.CanCollide = false
+            targetCache.Hitbox.Transparency = 1
+            targetCache.Hitbox.CanQuery = false
+            targetCache.Hitbox.Parent = Workspace
+        end
+
+        local size = Vector3.new(
+            silentFOV.xLeft + silentFOV.xRight,
+            silentFOV.yUpper + silentFOV.yLower,
+            silentFOV.zLeft + silentFOV.zRight
+        )
+        local offset = Vector3.new(
+            (silentFOV.xRight - silentFOV.xLeft)/2,
+            (silentFOV.yUpper - silentFOV.yLower)/2,
+            (silentFOV.zRight - silentFOV.zLeft)/2
+        )
+        local worldOffset = facing:VectorToWorldSpace(offset)
+
+        targetCache.Hitbox.Size = size
+        targetCache.Hitbox.CFrame = CFrame.new(basePos + worldOffset) * facing
+
+        if not targetCache.Box then
+            targetCache.Box = Instance.new("BoxHandleAdornment")
+            targetCache.Box.Adornee = targetCache.Hitbox
+            targetCache.Box.AlwaysOnTop = true
+            targetCache.Box.ZIndex = 10
+            targetCache.Box.Transparency = 0.7
+            targetCache.Box.Size = size
+            targetCache.Box.Parent = targetCache.Hitbox
+        end
+        targetCache.Box.Color3 = isMouseInSilentFOV() and Color3.new(0,1,0) or Color3.new(1,0,0)
+    else
+        if targetCache.Hitbox then targetCache.Hitbox:Destroy() targetCache.Hitbox = nil end
+        if targetCache.Box then targetCache.Box:Destroy() targetCache.Box = nil end
+    end
+
+    if showTrigger then
+        if not targetCache.Trigger then
+            targetCache.Trigger = Instance.new("Part")
+            targetCache.Trigger.Name = "TriggerHitbox_" .. targetPlayer.Name
+            targetCache.Trigger.Anchored = true
+            targetCache.Trigger.CanCollide = false
+            targetCache.Trigger.Transparency = 1
+            targetCache.Trigger.CanQuery = false
+            targetCache.Trigger.Parent = Workspace
+        end
+
+        local pred = getgenv().wizprivate['Trigger Bot'].Prediction
+        local predPos = root.Position
+        if root.Velocity.Magnitude > 1 then
+            predPos = predPos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
+        end
+
+        local size = Vector3.new(
+            triggerFOV.xLeft + triggerFOV.xRight,
+            triggerFOV.yUpper + triggerFOV.yLower,
+            triggerFOV.zLeft + triggerFOV.zRight
+        )
+        local offset = Vector3.new(
+            (triggerFOV.xRight - triggerFOV.xLeft)/2,
+            (triggerFOV.yUpper - triggerFOV.yLower)/2,
+            (triggerFOV.zRight - triggerFOV.zLeft)/2
+        )
+        local worldOffset = facing:VectorToWorldSpace(offset)
+        local upperPos = upperTorso and upperTorso.Position or predPos
+
+        targetCache.Trigger.Size = size
+        targetCache.Trigger.CFrame = CFrame.new(upperPos + worldOffset) * facing
+
+        if not targetCache.TriggerBox then
+            targetCache.TriggerBox = Instance.new("BoxHandleAdornment")
+            targetCache.TriggerBox.Adornee = targetCache.Trigger
+            targetCache.TriggerBox.AlwaysOnTop = true
+            targetCache.TriggerBox.ZIndex = 10
+            targetCache.TriggerBox.Transparency = 0.7
+            targetCache.TriggerBox.Size = size
+            targetCache.TriggerBox.Parent = targetCache.Trigger
+        end
+        targetCache.TriggerBox.Color3 = isMouseInTriggerFOV() and Color3.new(0,1,0) or Color3.new(1,1,1)
+    else
+        if targetCache.Trigger then targetCache.Trigger:Destroy() targetCache.Trigger = nil end
+        if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() targetCache.TriggerBox = nil end
+    end
 end
 
--- Check if mouse is in FOV box
+-- check if mouse is in fov box
 local function isMouseInBoxFOV(hitbox)
     if not hitbox or not hitbox.Parent then return false end
     local mousePos = UserInputService:GetMouseLocation()
-    local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
     local localOrigin = hitbox.CFrame:PointToObjectSpace(ray.Origin)
     local localDir = hitbox.CFrame:VectorToObjectSpace(ray.Direction).Unit
     local size = hitbox.Size / 2
@@ -212,27 +310,33 @@ local function isMouseInBoxFOV(hitbox)
 end
 
 local function isMouseInSilentFOV()
-    if not getSetting({'Silent Aimbot', 'FOV', 'Visualize'}, false) then return true end
-    return TargetCache.Hitbox and isMouseInBoxFOV(TargetCache.Hitbox)
+    if not getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV'] then return true end
+    return targetCache.Hitbox and isMouseInBoxFOV(targetCache.Hitbox)
 end
 
 local function isMouseInTriggerFOV()
-    if not getSetting({'Triggerbot', 'FOV', 'Visualize'}, false) then return true end
-    return TargetCache.Trigger and isMouseInBoxFOV(TargetCache.Trigger)
+    if not getgenv().wizprivate['Trigger Bot'].FOV['Show FOV'] then return true end
+    return targetCache.Trigger and isMouseInBoxFOV(targetCache.Trigger)
 end
 
--- Hitbox mode
+-- hitbox mode
 local function isMouseInTriggerHitbox()
-    if not TargetPlayer or not TargetPlayer.Character then return false end
+    if not targetPlayer or not targetPlayer.Character then return false end
     
     local mousePos = UserInputService:GetMouseLocation()
-    local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
     
-    local parts = R15_PARTS
+    local parts = {
+        "Head", "UpperTorso", "LowerTorso",
+        "LeftUpperArm", "LeftLowerArm", "LeftHand",
+        "RightUpperArm", "RightLowerArm", "RightHand",
+        "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+        "RightUpperLeg", "RightLowerLeg", "RightFoot"
+    }
     
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Whitelist
-    rayParams.FilterDescendantsInstances = {TargetPlayer.Character}
+    rayParams.FilterDescendantsInstances = {targetPlayer.Character}
     rayParams.IgnoreWater = true
     
     local result = Workspace:Raycast(ray.Origin, ray.Direction * 1000, rayParams)
@@ -248,40 +352,41 @@ local function isMouseInTriggerHitbox()
     return false
 end
 
--- Visible check
+-- visible check (MOVED OUTSIDE RenderStepped)
 local function isVisible(origin, targetPart, targetCharacter)
-    if not getSetting({'Target Checks', 'Wall'}, true) then return true end
+    if not getgenv().wizprivate.Checks['Visible Check'] then return true end
     if not (targetPart and targetPart:IsA("BasePart")) then return false end
     local direction = (targetPart.Position - origin)
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Blacklist
-    rayParams.FilterDescendantsInstances = { LocalPlayer.Character, targetCharacter }
+    rayParams.FilterDescendantsInstances = { localPlayer.Character, targetCharacter }
     rayParams.IgnoreWater = true
     local result = Workspace:Raycast(origin, direction, rayParams)
     return not result or result.Instance:IsDescendantOf(targetCharacter)
 end
 
--- Crew check
+-- crew check
 local function isSameCrew(target)
-    local localCrew = LocalPlayer:GetAttribute("CrewID")
+    if not getgenv().wizprivate.Checks['Crew Check'] then return false end
+    local localCrew = localPlayer:GetAttribute("CrewID")
     local targetCrew = target:GetAttribute("CrewID")
     return localCrew and targetCrew and localCrew == targetCrew
 end
 
--- Triggerbot 
+-- triggerbot 
 local function triggerbot()
-    local Tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-    if Tool and Tool:IsDescendantOf(LocalPlayer.Character) and Tool.Name ~= '[Knife]' then
+    local Tool = localPlayer.Character:FindFirstChildOfClass("Tool")
+    if Tool and Tool:IsDescendantOf(localPlayer.Character) and Tool.Name ~= '[Knife]' then
         for i = 1, 3 do
             Tool:Activate()
         end
     end
 end
 
--- Closest point (basic)
+-- closest point (basic)
 local function basicpoint(part)
     if not part then return nil end
-    local mouseRay = Mouse.UnitRay
+    local mouseRay = mouse.UnitRay
     mouseRay = mouseRay.Origin + (mouseRay.Direction * (part.Position - mouseRay.Origin).Magnitude)
     local point = (mouseRay.Y >= (part.Position - part.Size / 2).Y and mouseRay.Y <= (part.Position + part.Size / 2).Y) 
                   and (part.Position + Vector3.new(0, -part.Position.Y + mouseRay.Y, 0)) 
@@ -290,27 +395,27 @@ local function basicpoint(part)
     check.FilterType = Enum.RaycastFilterType.Whitelist
     check.FilterDescendantsInstances = {part}
     local ray = Workspace:Raycast(mouseRay, (point - mouseRay), check)
-    if Mouse.Target == part then return Mouse.Hit.Position end
+    if mouse.Target == part then return mouse.Hit.Position end
     if ray then return ray.Position end
-    return Mouse.Hit.Position
+    return mouse.Hit.Position
 end
 
--- Point cache
-local PointCache = {}
+-- point cache
+local pointCache = {}
 
--- Closest point (dynamic density + scale)
+-- closest point (dynamic density + scale)
 local function getClosestPoint(character, isCamlock)
     if not (character and character.Parent) then return nil end
     local mousePos = UserInputService:GetMouseLocation()
     local mouseX, mouseY = mousePos.X, mousePos.Y
-    local cam = Camera
+    local cam = camera
     local ray = cam:ViewportPointToRay(mouseX, mouseY)
 
-    local cfg = isCamlock and getSetting({'Aim Assist', 'Hit Target'}, {})
-                           or getSetting({'Silent Aimbot', 'Hit Target'}, {})
-    local mode = cfg.Prediction and "Advanced" or "Basic"
-    local scale = 0.17
-    local density = 4
+    local cfg = isCamlock and getgenv().wizprivate['Camera Aimbot']['Closest Point'] 
+                           or getgenv().wizprivate['Silent Aimbot']['Closest Point']
+    local mode = cfg.Mode or "Advanced"
+    local scale = cfg['Scale'] or 0.17
+    local density = cfg['Density'] or 4
     local scaleFactor = math.clamp(scale, 0, 1)
 
     local bestDist = 1e9
@@ -339,8 +444,8 @@ local function getClosestPoint(character, isCamlock)
         end
     else
         local POINT_COUNT = density * density * density
-        if not PointCache[character] then PointCache[character] = table.create(POINT_COUNT) end
-        local points = PointCache[character]
+        if not pointCache[character] then pointCache[character] = table.create(POINT_COUNT) end
+        local points = pointCache[character]
         local i = 0
         local STEP = 1 / (density - 1)
         local STEP_OFFSETS = {}
@@ -384,35 +489,33 @@ local function getClosestPoint(character, isCamlock)
     return root and { Part = root, Position = root.Position }
 end
 
--- Get hitpart for silent aimbot
+-- get hitpart for silent aimbot
 local function getClosestBodyPart(character)
     if not character then return nil end
-    local hitPart = getSetting({'Silent Aimbot', 'Hit Target', 'Hit Part'}, 'Head')
-    if hitPart == "Closest Point" then
+    if getgenv().wizprivate['Silent Aimbot'].HitPart == "Closest Point" then
         return getClosestPoint(character, false)
     end
-    local part = character:FindFirstChild(hitPart)
+    local part = character:FindFirstChild(getgenv().wizprivate['Silent Aimbot'].HitPart)
     if part and part:IsA("BasePart") then
         return { Part = part, Position = part.Position }
     end
     return getClosestPoint(character, false)
 end
 
--- Get hitpart for camera aimbot
+-- get hitpart for camera aimbot
 local function getCamlockBodyPart(character)
     if not character then return nil end
-    local hitPart = getSetting({'Aim Assist', 'Hit Target', 'Hit Part'}, 'Closest Point')
-    if hitPart == "Closest Point" then
+    if getgenv().wizprivate['Camera Aimbot'].HitPart == "Closest Point" then
         return getClosestPoint(character, true)
     end
-    local part = character:FindFirstChild(hitPart)
+    local part = character:FindFirstChild(getgenv().wizprivate['Camera Aimbot'].HitPart)
     if part and part:IsA("BasePart") then
         return { Part = part, Position = part.Position }
     end
     return getClosestPoint(character, true)
 end
 
--- Knock checks
+-- knock checks
 local function isTargetKnocked(target)
     local bodyEffects = target.Character and target.Character:FindFirstChild("BodyEffects")
     local ko = bodyEffects and bodyEffects:FindFirstChild("K.O")
@@ -420,71 +523,72 @@ local function isTargetKnocked(target)
 end
 
 local function isSelfKnocked()
-    local bodyEffects = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("BodyEffects")
+    local bodyEffects = localPlayer.Character and localPlayer.Character:FindFirstChild("BodyEffects")
     local ko = bodyEffects and bodyEffects:FindFirstChild("K.O")
     return ko and ko.Value
 end
 
-local function withinDistance(part, maxDist)
+local function withindistance(part, distcfg)
+    if not distcfg or not distcfg['enabled'] then return true end
     if not part or not part.Parent then return false end
-    if not maxDist then return true end
 
-    local char = LocalPlayer.Character
+    local char = localPlayer.Character
     if not char then return false end
 
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
 
-    return (hrp.Position - part.Position).Magnitude <= maxDist
+    return (hrp.Position - part.Position).Magnitude <= distcfg['max distance']
 end
 
-local function updateTargetLine()
-    local cfg = getSetting({'Silent Aimbot', 'Target Line'}, {})
-    if not getSetting({'Silent Aimbot', 'Target Line'}, false) then
-        TargetLine.Visible = false
+local function updatetargetline()
+    local cfg = getgenv().wizprivate['Silent Aimbot']['Target Line']
+    if not cfg['enabled'] then
+        targetline.Visible = false
         return
     end
 
-    if not TargetPlayer or not TargetPlayer.Character then
-        TargetLine.Visible = false
+    if not targetPlayer or not targetPlayer.Character then
+        targetline.Visible = false
         return
     end
 
-    local char = TargetPlayer.Character
+    local char = targetPlayer.Character
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then
-        TargetLine.Visible = false
+        targetline.Visible = false
         return
     end
 
-    local screenpos, onscreen = Camera:WorldToViewportPoint(hrp.Position)
+    local screenpos, onscreen = camera:WorldToViewportPoint(hrp.Position)
 
     if onscreen and screenpos.Z > 0 then
         local mpos = UserInputService:GetMouseLocation()
 
-        TargetLine.From        = Vector2.new(mpos.X, mpos.Y)
-        TargetLine.To          = Vector2.new(screenpos.X, screenpos.Y)
-        TargetLine.Thickness   = cfg.thickness or 2.5
-        TargetLine.Transparency = cfg.transparency or 0
+        targetline.From        = Vector2.new(mpos.X, mpos.Y)
+        targetline.To          = Vector2.new(screenpos.X, screenpos.Y)
+        targetline.Thickness   = cfg['thickness']
+        targetline.Transparency = cfg['transparency']
 
         if isMouseInSilentFOV() then
-            TargetLine.Color = Color3.fromRGB(0, 255, 0)
+            targetline.Color = cfg['in fov']
         else
-            TargetLine.Color = Color3.fromRGB(255, 0, 0)
+            targetline.Color = cfg['regular']
         end
 
-        TargetLine.Visible = true
+        targetline.Visible = true
     else
-        TargetLine.Visible = false
+        targetline.Visible = false
     end
 end
 
 local function getBestTarget()
     local closestPlayer, closestDist = nil, math.huge
     local mousePos = UserInputService:GetMouseLocation()
+    local cam = Workspace.CurrentCamera
 
     for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
+        if player == localPlayer then continue end
         local char = player.Character
         if not char then continue end
 
@@ -492,19 +596,24 @@ local function getBestTarget()
         local head = char:FindFirstChild("Head")
         if not root or not head then continue end
 
-        -- CHECKS
+        -- === CHECKS ===
         local be = char:FindFirstChild("BodyEffects")
         local ko = be and be:FindFirstChild("K.O")
         local ff = char:FindFirstChildOfClass("ForceField")
 
         local pass = true
-        if getSetting({'Target Checks', 'Knocked'}, true) and ko and ko.Value then pass = false end
-        if getSetting({'Target Checks', 'Forcefield'}, true) and ff then pass = false end
-        if getSetting({'Target Checks', 'Wall'}, true) and not isVisible(Camera.CFrame.Position, head, char) then pass = false end
+        if getgenv().wizprivate.Checks['Knock Check'] and ko and ko.Value then pass = false end
+        if getgenv().wizprivate.Checks['Forcefield Check'] and ff then pass = false end
+        if getgenv().wizprivate.Checks['Crew Check'] and isSameCrew(player) then pass = false end
         if not pass then continue end
 
+        -- Visible check (optional)
+        if getgenv().wizprivate.Checks['Visible Check'] then
+            if not isVisible(cam.CFrame.Position, head, char) then continue end
+        end
+
         -- Screen position & distance
-        local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+        local screenPos, onScreen = cam:WorldToViewportPoint(root.Position)
         if not onScreen or screenPos.Z <= 0 then continue end
 
         local dist2D = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
@@ -517,22 +626,24 @@ local function getBestTarget()
     return closestPlayer
 end
 
--- Target UI
-local TargetUI = nil
-local TargetUIUpdateConn = nil
-local TargetUIVisible = false
+-- target UI
+local TweenService = game:GetService("TweenService")
+
+local targetUI = nil
+local targetUIUpdateConn = nil
+local targetUIVisible = false
 
 local function destroyTargetUI()
-    if TargetUIUpdateConn then
-        TargetUIUpdateConn:Disconnect()
-        TargetUIUpdateConn = nil
+    if targetUIUpdateConn then
+        targetUIUpdateConn:Disconnect()
+        targetUIUpdateConn = nil
     end
-    if TargetUI then
-        TargetUI:Destroy()
-        TargetUI = nil
+    if targetUI then
+        targetUI:Destroy()
+        targetUI = nil
     end
-    TargetLine.Visible = false
-    TargetUIVisible = false
+    targetline.Visible = false
+    targetUIVisible = false
 end
 
 local function getProfilePicture(userId)
@@ -554,16 +665,16 @@ local function showTargetUI(player)
     local userId   = player.UserId
     local dispName = player.DisplayName
 
-    -- ScreenGui
+    -- ── ScreenGui ─────────────────────────────────────────────────
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name           = "BrightsideTargetUI"
+    screenGui.Name           = "WizTargetUI"
     screenGui.ResetOnSpawn   = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     screenGui.IgnoreGuiInset = true
     screenGui.Parent         = game:GetService("CoreGui")
-    TargetUI = screenGui
+    targetUI = screenGui
 
-    -- Card
+    -- Card: centered, anchored bottom, sits above the game's HUD bar
     local CARD_W = 280
     local CARD_H = 58
 
@@ -571,7 +682,7 @@ local function showTargetUI(player)
     frame.Name               = "MainFrame"
     frame.Size               = UDim2.new(0, CARD_W, 0, CARD_H)
     frame.AnchorPoint        = Vector2.new(0.5, 1)
-    frame.Position           = UDim2.new(0.5, 0, 1, 80)
+    frame.Position           = UDim2.new(0.5, 0, 1, 80) -- starts off-screen below
     frame.BackgroundColor3   = Color3.fromRGB(14, 14, 20)
     frame.BackgroundTransparency = 0.06
     frame.BorderSizePixel    = 0
@@ -581,14 +692,14 @@ local function showTargetUI(player)
     fCorner.CornerRadius = UDim.new(0, 8)
     fCorner.Parent = frame
 
-    -- Border stroke
+    -- red border stroke
     local stroke = Instance.new("UIStroke")
     stroke.Color        = Color3.fromRGB(210, 20, 20)
     stroke.Thickness    = 1.8
     stroke.Transparency = 0.1
     stroke.Parent       = frame
 
-    -- Profile picture
+    -- ── Profile picture — left, red border ────────────────────────
     local PFP_SIZE = 48
     local pfpBorder = Instance.new("Frame")
     pfpBorder.Size             = UDim2.new(0, PFP_SIZE + 4, 0, PFP_SIZE + 4)
@@ -615,15 +726,15 @@ local function showTargetUI(player)
     pfpCorner.CornerRadius = UDim.new(0, 4)
     pfpCorner.Parent = pfpImg
 
-    -- Text content
-    local TX = PFP_SIZE + 18
+    -- ── Text content — right of pfp ───────────────────────────────
+    local TX = PFP_SIZE + 18  -- left edge of text column
 
-    -- LOCKED label
+    -- Row 1: 𝐿𝒪𝒞𝒦𝐸𝒟 — glow ON the letters using UIStroke
     local lockedLeftLabel = Instance.new("TextLabel")
     lockedLeftLabel.Size             = UDim2.new(0, 110, 0, 18)
     lockedLeftLabel.Position         = UDim2.new(0, TX, 0, 8)
     lockedLeftLabel.BackgroundTransparency = 1
-    lockedLeftLabel.Text             = "LOCKED"
+    lockedLeftLabel.Text             = "𝐿𝒪𝒞𝒦𝐸𝒟"
     lockedLeftLabel.TextColor3       = Color3.fromRGB(255, 45, 45)
     lockedLeftLabel.TextSize         = 13
     lockedLeftLabel.Font             = Enum.Font.GothamBold
@@ -631,6 +742,7 @@ local function showTargetUI(player)
     lockedLeftLabel.ZIndex           = 2
     lockedLeftLabel.Parent           = frame
 
+    -- UIStroke traces every letter edge with a thick red glow
     local lockedStroke = Instance.new("UIStroke")
     lockedStroke.Color       = Color3.fromRGB(255, 0, 0)
     lockedStroke.Thickness   = 2.5
@@ -638,7 +750,28 @@ local function showTargetUI(player)
     lockedStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
     lockedStroke.Parent      = lockedLeftLabel
 
-    -- Display name
+    -- second thicker stroke layer for a soft outer bloom effect
+    local lockedLabelOuter = Instance.new("TextLabel")
+    lockedLabelOuter.Size             = UDim2.new(0, 110, 0, 18)
+    lockedLabelOuter.Position         = UDim2.new(0, TX, 0, 8)
+    lockedLabelOuter.BackgroundTransparency = 1
+    lockedLabelOuter.Text             = "𝐿𝒪𝒞𝒦𝐸𝒟"
+    lockedLabelOuter.TextColor3       = Color3.fromRGB(255, 45, 45)
+    lockedLabelOuter.TextTransparency = 1  -- invisible fill, only stroke shows
+    lockedLabelOuter.TextSize         = 13
+    lockedLabelOuter.Font             = Enum.Font.GothamBold
+    lockedLabelOuter.TextXAlignment   = Enum.TextXAlignment.Left
+    lockedLabelOuter.ZIndex           = 1
+    lockedLabelOuter.Parent           = frame
+
+    local lockedStrokeOuter = Instance.new("UIStroke")
+    lockedStrokeOuter.Color          = Color3.fromRGB(200, 0, 0)
+    lockedStrokeOuter.Thickness      = 6
+    lockedStrokeOuter.Transparency   = 0.55
+    lockedStrokeOuter.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+    lockedStrokeOuter.Parent         = lockedLabelOuter
+
+    -- Row 2: display name — white, middle row
     local nameLabel = Instance.new("TextLabel")
     nameLabel.Size             = UDim2.new(0, 150, 0, 16)
     nameLabel.Position         = UDim2.new(0, TX, 0, 22)
@@ -652,7 +785,7 @@ local function showTargetUI(player)
     nameLabel.ZIndex           = 2
     nameLabel.Parent           = frame
 
-    -- HP and ARM labels
+    -- Row 2 (bottom): HP green + ARM cyan inline
     local hpLabel = Instance.new("TextLabel")
     hpLabel.Name               = "HPLabel"
     hpLabel.Size               = UDim2.new(0, 62, 0, 16)
@@ -679,7 +812,7 @@ local function showTargetUI(player)
     armLabel.ZIndex            = 2
     armLabel.Parent            = frame
 
-    -- Distance label
+    -- ── Top-right: studs (very top) ───────────────────────────────
     local distLabel = Instance.new("TextLabel")
     distLabel.Name             = "Distance"
     distLabel.Size             = UDim2.new(0, 88, 0, 16)
@@ -693,40 +826,64 @@ local function showTargetUI(player)
     distLabel.ZIndex           = 2
     distLabel.Parent           = frame
 
-    -- Slide up into place
+    -- ── Slide up into place ───────────────────────────────────────
     TweenService:Create(frame, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
         Position = UDim2.new(0.5, 0, 1, -110)
     }):Play()
 
-    TargetUIVisible = true
+    targetUIVisible = true
 
-    -- Fetch pfp async
+    -- fetch pfp async, update image once loaded
     task.spawn(function()
         local url = getProfilePicture(userId)
-        if TargetUI then
-            local img = TargetUI:FindFirstChild("PFP", true)
+        if targetUI then
+            local img = targetUI:FindFirstChild("PFP", true)
             if img then img.Image = url end
         end
     end)
 
-    -- Live update
+    -- ── Armor scanner — works across any Roblox game ──────────────
+    local function getArmorValue(char, hum)
+        local a = hum and hum:GetAttribute("Armor")
+        if type(a) == "number" then return a end
+        for _, parent in ipairs({char, hum}) do
+            if parent then
+                for _, v in ipairs(parent:GetChildren()) do
+                    local n = v.Name:lower()
+                    if n == "armor" or n == "shield" or n == "vest" or n == "armour" then
+                        if v:IsA("IntValue") or v:IsA("NumberValue") then
+                            return v.Value
+                        end
+                    end
+                end
+            end
+        end
+        local be = char:FindFirstChild("BodyEffects")
+        if be then
+            local av = be:FindFirstChild("Armor") or be:FindFirstChild("Shield") or be:FindFirstChild("Armour")
+            if av and (av:IsA("IntValue") or av:IsA("NumberValue")) then return av.Value end
+        end
+        return nil
+    end
+
+    -- ── Live update — called immediately then every frame ─────────
     local function updateStats()
-        if not TargetPlayer or not TargetPlayer.Character then
+        if not targetPlayer or not targetPlayer.Character then
             destroyTargetUI()
             return
         end
 
-        local char  = TargetPlayer.Character
+        local char  = targetPlayer.Character
         local hrp   = char:FindFirstChild("HumanoidRootPart")
         local hum   = char:FindFirstChildOfClass("Humanoid")
-        local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local myHrp = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
 
-        -- Distance
+        -- studs (top right)
         if hrp and myHrp then
             distLabel.Text = math.floor((hrp.Position - myHrp.Position).Magnitude) .. " studs"
         end
 
-        -- HP
+        -- HP — real Health / MaxHealth, no hardcoded value
         if hum then
             local hp    = math.max(0, math.floor(hum.Health))
             local maxHp = math.max(hum.MaxHealth, 1)
@@ -741,14 +898,8 @@ local function showTargetUI(player)
             end
         end
 
-        -- ARM
-        local armVal = nil
-        local be = char:FindFirstChild("BodyEffects")
-        if be then
-            local av = be:FindFirstChild("Armor") or be:FindFirstChild("Shield") or be:FindFirstChild("Armour")
-            if av and (av:IsA("IntValue") or av:IsA("NumberValue")) then armVal = av.Value end
-        end
-        
+        -- ARM — real value scanned from character
+        local armVal = getArmorValue(char, hum)
         if armVal ~= nil then
             local v = math.max(0, math.floor(armVal))
             armLabel.Text       = "ARM " .. v
@@ -759,45 +910,46 @@ local function showTargetUI(player)
         end
     end
 
-    updateStats()
-    TargetUIUpdateConn = RunService.RenderStepped:Connect(updateStats)
+    updateStats() -- immediate, so no placeholder flicker
+    targetUIUpdateConn = RunService.RenderStepped:Connect(updateStats)
 end
 
 local function clearTargetIfInvalid()
-    if not TargetPlayer or not TargetPlayer.Character then
-        TargetPlayer = nil
-        CamLockTarget = nil
-        CamLockPart = nil
-        CamLockActive = false
+    if not targetPlayer or not targetPlayer.Character then
+        targetPlayer = nil
+        camLockTarget = nil
+        camLockPart = nil
+        camLockActive = false
         destroyTargetUI()
         pcall(function()
-            if TargetCache.Hitbox then TargetCache.Hitbox:Destroy() end
-            if TargetCache.Box then TargetCache.Box:Destroy() end
-            if TargetCache.Trigger then TargetCache.Trigger:Destroy() end
-            if TargetCache.TriggerBox then TargetCache.TriggerBox:Destroy() end
+            if targetCache.Hitbox then targetCache.Hitbox:Destroy() end
+            if targetCache.Box then targetCache.Box:Destroy() end
+            if targetCache.Trigger then targetCache.Trigger:Destroy() end
+            if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() end
         end)
         return true
     end
 
-    local char = TargetPlayer.Character
+    local char = targetPlayer.Character
     local root = char:FindFirstChild("HumanoidRootPart")
     local be = char:FindFirstChild("BodyEffects")
     local ff = char:FindFirstChildOfClass("ForceField")
 
     local invalid = not root
-                 or (getSetting({'Target Checks', 'Forcefield'}, true) and ff)
+                 or (getgenv().wizprivate.Checks['Forcefield Check'] and ff)
+                 or (getgenv().wizprivate.Checks['Crew Check'] and isSameCrew(targetPlayer))
 
     if invalid then
-        TargetPlayer = nil
-        CamLockTarget = nil
-        CamLockPart = nil
-        CamLockActive = false
+        targetPlayer = nil
+        camLockTarget = nil
+        camLockPart = nil
+        camLockActive = false
         destroyTargetUI()
         pcall(function()
-            if TargetCache.Hitbox then TargetCache.Hitbox:Destroy() end
-            if TargetCache.Box then TargetCache.Box:Destroy() end
-            if TargetCache.Trigger then TargetCache.Trigger:Destroy() end
-            if TargetCache.TriggerBox then TargetCache.TriggerBox:Destroy() end
+            if targetCache.Hitbox then targetCache.Hitbox:Destroy() end
+            if targetCache.Box then targetCache.Box:Destroy() end
+            if targetCache.Trigger then targetCache.Trigger:Destroy() end
+            if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() end
         end)
         return true
     end
@@ -805,10 +957,10 @@ local function clearTargetIfInvalid()
     return false
 end
 
--- ESP
-local function addESP(player)
-    if player == LocalPlayer then return end
-    if not getSetting({'Raid Awareness', 'Name', 'Enabled'}, true) then return end
+-- esp
+local function addesp(player)
+    if player == localPlayer then return end
+    if not getgenv().wizprivate['esp']['enabled'] then return end
 
     local esp = {
         player = player,
@@ -819,37 +971,37 @@ local function addESP(player)
     esp.nametag.Center = true
     esp.nametag.Outline = true
     esp.nametag.OutlineColor = Color3.fromRGB(0, 0, 0)
-    esp.nametag.Color = getSetting({'Raid Awareness', 'Name', 'Other Color'}, Color3.fromRGB(255, 255, 255))
+    esp.nametag.Color = getgenv().wizprivate['esp']['color']
     esp.nametag.Font = Drawing.Fonts.Plex
     esp.nametag.Visible = false
     esp.nametag.ZIndex = 1000
 
-    ESPLabels[player.UserId] = esp
+    esplabels[player.UserId] = esp
 end
 
-local function removeESP(player)
-    local esp = ESPLabels[player.UserId]
+local function removeesp(player)
+    local esp = esplabels[player.UserId]
     if esp then
         esp.nametag:Remove()
-        ESPLabels[player.UserId] = nil
+        esplabels[player.UserId] = nil
     end
 end
 
-local function refreshESP()
-    if not getSetting({'Raid Awareness', 'Name', 'Enabled'}, true) then
-        for userid, esp in pairs(ESPLabels) do
+local function refreshesp()
+    if not getgenv().wizprivate['esp']['enabled'] then
+        for userid, esp in pairs(esplabels) do
             esp.nametag:Remove()
-            ESPLabels[userid] = nil
+            esplabels[userid] = nil
         end
         return
     end
 
-    for userid, esp in pairs(ESPLabels) do
+    for userid, esp in pairs(esplabels) do
         local player = esp.player
         if not player or not player.Parent then
             esp.nametag.Visible = false
             esp.nametag:Remove()
-            ESPLabels[userid] = nil
+            esplabels[userid] = nil
             continue
         end
 
@@ -863,8 +1015,14 @@ local function refreshESP()
             local head = player.Character.Head
             local hrp = player.Character.HumanoidRootPart
 
-            local worldpos = hrp.Position - Vector3.new(0, 2.8, 0)
-            local esppos, onscreen = Camera:WorldToViewportPoint(worldpos)
+            local worldpos
+            if getgenv().wizprivate['esp']['name above'] then
+                worldpos = head.Position + Vector3.new(0, 1.5, 0)
+            else
+                worldpos = hrp.Position - Vector3.new(0, 2.8, 0)
+            end
+
+            local esppos, onscreen = camera:WorldToViewportPoint(worldpos)
 
             if onscreen and esppos.Z > 0 then
                 local newpos = Vector2.new(esppos.X, esppos.Y)
@@ -873,12 +1031,16 @@ local function refreshESP()
                     esp.nametag.Position = newpos
                 end
 
-                esp.nametag.Text = player.DisplayName
-
-                if TargetPlayer and TargetPlayer.Character and player.Character == TargetPlayer.Character then
-                    esp.nametag.Color = getSetting({'Raid Awareness', 'Name', 'Target Color'}, Color3.fromRGB(0, 255, 0))
+                if getgenv().wizprivate['esp']['use display name'] then
+                    esp.nametag.Text = player.DisplayName
                 else
-                    esp.nametag.Color = getSetting({'Raid Awareness', 'Name', 'Other Color'}, Color3.fromRGB(255, 255, 255))
+                    esp.nametag.Text = player.Name
+                end
+
+                if targetPlayer and targetPlayer.Character and player.Character == targetPlayer.Character then
+                    esp.nametag.Color = getgenv().wizprivate['esp']['target color']
+                else
+                    esp.nametag.Color = getgenv().wizprivate['esp']['color']
                 end
 
                 esp.nametag.Visible = true
@@ -891,47 +1053,46 @@ local function refreshESP()
     end
 end
 
--- Initialize ESP
 for _, player in pairs(Players:GetPlayers()) do
-    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        addESP(player)
+    if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        addesp(player)
     end
 
     player.CharacterAdded:Connect(function(char)
-        removeESP(player)
+        removeesp(player)
         char:WaitForChild("HumanoidRootPart")
         task.wait(0.1)
-        addESP(player)
+        addesp(player)
     end)
 
     player.CharacterRemoving:Connect(function()
-        removeESP(player)
+        removeesp(player)
     end)
 end
 
 Players.PlayerAdded:Connect(function(player)
-    if player ~= LocalPlayer then
+    if player ~= localPlayer then
         player.CharacterAdded:Connect(function(char)
-            removeESP(player)
+            removeesp(player)
             char:WaitForChild("HumanoidRootPart")
             task.wait(0.1)
-            addESP(player)
+            addesp(player)
         end)
 
         player.CharacterRemoving:Connect(function()
-            removeESP(player)
+            removeesp(player)
         end)
     end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
-    removeESP(player)
+    removeesp(player)
 end)
 
--- Skin Changer
-local KnifeData = {}
+-- skin changer
+local knifedata = {}
 
-local KnifeSkins = {
+local knifeskins = {
     ["Golden Age Tanto"] = {soundid = "rbxassetid://5917819099", animationid = "rbxassetid://13473404819", positionoffset = Vector3.new(0, -0.20, -1.2), rotationoffset = Vector3.new(90, 263.7, 180)},
     ["GPO-Knife"] = {soundid = "rbxassetid://4604390759", animationid = "rbxassetid://14014278925", positionoffset = Vector3.new(0.00, -0.32, -1.07), rotationoffset = Vector3.new(90, -97.4, 90)},
     ["GPO-Knife Prestige"] = {soundid = "rbxassetid://4604390759", animationid = "rbxassetid://14014278925", positionoffset = Vector3.new(0.00, -0.32, -1.07), rotationoffset = Vector3.new(90, -97.4, 90)},
@@ -954,7 +1115,9 @@ local KnifeSkins = {
     ["Ribbon"] = {soundid = "rbxassetid://130974579277249", animationid = "rbxassetid://124102609796063", positionoffset = Vector3.new(0.02, -0.25, -0.05), rotationoffset = Vector3.new(90.00, 0.00, 180.00)},
 }
 
-local function clearMesh(tool, exclude)
+local replicatedstorage = game:GetService("ReplicatedStorage")
+
+local function clearmesh(tool, exclude)
     local children = tool:GetChildren()
     for i = 1, #children do
         local v = children[i]
@@ -964,11 +1127,11 @@ local function clearMesh(tool, exclude)
     end
 end
 
-local function applyGun(tool, name)
+local function applygun(tool, name)
     local orig = tool:FindFirstChildOfClass("MeshPart")
     if not orig then return end
 
-    local skinmodules = ReplicatedStorage:FindFirstChild("SkinModules")
+    local skinmodules = replicatedstorage:FindFirstChild("SkinModules")
     if not skinmodules then return end
 
     local ok, skinmodulesreq = pcall(function()
@@ -979,7 +1142,7 @@ local function applyGun(tool, name)
     local info = skinmodulesreq[tool.Name] and skinmodulesreq[tool.Name][name]
     if not info then return end
 
-    clearMesh(tool, orig)
+    clearmesh(tool, orig)
 
     local skinpart = info.TextureID
     if typeof(skinpart) == "Instance" then
@@ -1005,7 +1168,7 @@ local function applyGun(tool, name)
 
     local shoot = handle:FindFirstChild("ShootSound")
     if shoot then
-        local skinassets = ReplicatedStorage:FindFirstChild("SkinAssets")
+        local skinassets = replicatedstorage:FindFirstChild("SkinAssets")
         if skinassets then
             local gunsounds = skinassets:FindFirstChild("GunShootSounds")
             if gunsounds then
@@ -1018,11 +1181,30 @@ local function applyGun(tool, name)
         end
     end
 
+    local skinassets = replicatedstorage:FindFirstChild("SkinAssets")
+    if skinassets then
+        local particlefolder = skinassets:FindFirstChild("GunHandleParticle")
+        if particlefolder then
+            local particlesource = particlefolder:FindFirstChild(name)
+            if particlesource then
+                local pe = particlesource:FindFirstChild("ParticleEmitter")
+                if pe then
+                    for _, existing in ipairs(handle:GetChildren()) do
+                        if existing:IsA("ParticleEmitter") then
+                            existing:Destroy()
+                        end
+                    end
+                    pe:Clone().Parent = handle
+                end
+            end
+        end
+    end
+
     handle:SetAttribute("SkinName", name)
 end
 
-local function clearKnife(tool)
-    local data = KnifeData[tool]
+local function cleanknife(tool)
+    local data = knifedata[tool]
     if data then
         if data.track then
             data.track:Stop()
@@ -1039,7 +1221,6 @@ local function clearKnife(tool)
                 if s and s.Parent then s:Destroy() end
             end
         end
-        data.applying = false
     end
 
     local mesh = tool:FindFirstChild("Default")
@@ -1054,32 +1235,26 @@ local function clearKnife(tool)
         mesh.Transparency = 0
     end
 
-    KnifeData[tool] = nil
+    knifedata[tool] = nil
 end
 
-local function applyKnife(char, tool, skin)
-    local skincfg = KnifeSkins[skin]
+local function applyknife(char, tool, skin)
+    local skincfg = knifeskins[skin]
     if not skincfg then return end
 
     local hum = char:FindFirstChild("Humanoid")
     local rhand = char:FindFirstChild("RightHand")
     if not hum or not rhand then return end
 
-    -- Check if knife animation is already playing
-    local existingData = KnifeData[tool]
-    if existingData and existingData.track and existingData.track.IsPlaying then
-        return -- Don't interrupt existing animation
-    end
-
-    clearKnife(tool)
-    KnifeData[tool] = {track = nil, welds = {}, sounds = {}, applying = true}
-    local data = KnifeData[tool]
+    cleanknife(tool)
+    knifedata[tool] = {track = nil, welds = {}, sounds = {}}
+    local data = knifedata[tool]
 
     local mesh = tool:FindFirstChild("Default")
     if not mesh then return end
     mesh.Transparency = 1
 
-    local skinmodules = ReplicatedStorage:FindFirstChild("SkinModules")
+    local skinmodules = replicatedstorage:FindFirstChild("SkinModules")
     if not skinmodules then return end
     local knives = skinmodules:FindFirstChild("Knives")
     if not knives then return end
@@ -1145,6 +1320,22 @@ local function applyKnife(char, tool, skin)
             clone.TextureID = skincfg.textureid
         end
 
+        if skincfg.particle then
+            local skinassets = replicatedstorage:FindFirstChild("SkinAssets")
+            if skinassets then
+                local particlefolder = skinassets:FindFirstChild("GunHandleParticle")
+                if particlefolder then
+                    local particlesource = particlefolder:FindFirstChild(skin)
+                    if particlesource then
+                        local pe = particlesource:FindFirstChild("ParticleEmitter")
+                        if pe then
+                            pe:Clone().Parent = clone
+                        end
+                    end
+                end
+            end
+        end
+
         clone.Parent = mesh
         local w = Instance.new("Weld")
         w.Part0 = handr
@@ -1170,7 +1361,6 @@ local function applyKnife(char, tool, skin)
         track.Ended:Once(function()
             if data.track == track then
                 data.track = nil
-                data.applying = false
             end
             track:Destroy()
         end)
@@ -1189,90 +1379,104 @@ local function applyKnife(char, tool, skin)
     tool:SetAttribute("CurrentKnifeSkin", skin)
 end
 
-local ToolRegistry = {}
+local toolregistry = {}
 
-local function setupTool(tool)
+local function setuptool(tool)
     if not tool:IsA("Tool") then return end
-    if ToolRegistry[tool] then return end
-    ToolRegistry[tool] = true
+    if toolregistry[tool] then return end
+    toolregistry[tool] = true
 
     tool.Equipped:Connect(function()
-        local skinConfig = getSetting({'skins'}, {})
-        if not skinConfig.enabled then return end
+        if not getgenv().wizprivate['skins']['enabled'] then return end
 
         local char = tool.Parent
-        if char ~= LocalPlayer.Character then return end
+        if char ~= localPlayer.Character then return end
 
-        local skin = skinConfig.weapons and skinConfig.weapons[tool.Name]
+        local skin = getgenv().wizprivate['skins']['weapons'][tool.Name]
         if not skin or skin == "" then return end
 
-        print("🔧 Applying skin:", skin, "to", tool.Name)
-
         if tool.Name == "[Knife]" then
-            task.spawn(function()
-                applyKnife(char, tool, skin)
-            end)
+            applyknife(char, tool, skin)
         else
-            task.spawn(function()
-                applyGun(tool, skin)
-            end)
+            applygun(tool, skin)
         end
     end)
 
     tool.Unequipped:Connect(function()
         if tool.Name == "[Knife]" then
-            clearKnife(tool)
+            local data = knifedata[tool]
+            if not data then return end
+            if data.welds then
+                for _, w in ipairs(data.welds) do
+                    if w then w:Destroy() end
+                end
+                data.welds = {}
+            end
+            if data.sounds then
+                for _, s in ipairs(data.sounds) do
+                    if s and s.Parent then s:Destroy() end
+                end
+                data.sounds = {}
+            end
             local mesh = tool:FindFirstChild("Default")
-            if mesh then mesh.Transparency = 0 end
+            if mesh then
+                local children = mesh:GetChildren()
+                for i = 1, #children do
+                    local v = children[i]
+                    if v.Name == "Handle.R" or v:IsA("Model") or (v:IsA("MeshPart") and v.Name ~= "Default") then
+                        v:Destroy()
+                    end
+                end
+                mesh.Transparency = 0
+            end
         end
     end)
 
-    if tool.Parent == LocalPlayer.Character then
-        local skinConfig = getSetting({'skins'}, {})
-        if skinConfig.enabled then
-            local skin = skinConfig.weapons and skinConfig.weapons[tool.Name]
-            if skin and skin ~= "" then
-                if tool.Name == "[Knife]" then
-                    task.spawn(function()
-                        applyKnife(LocalPlayer.Character, tool, skin)
-                    end)
-                else
-                    task.spawn(function()
-                        applyGun(tool, skin)
-                    end)
-                end
+    if tool.Parent == localPlayer.Character then
+        if not getgenv().wizprivate['skins']['enabled'] then return end
+
+        local skin = getgenv().wizprivate['skins']['weapons'][tool.Name]
+        if skin and skin ~= "" then
+            if tool.Name == "[Knife]" then
+                task.spawn(function()
+                    applyknife(localPlayer.Character, tool, skin)
+                end)
+            else
+                task.spawn(function()
+                    applygun(tool, skin)
+                end)
             end
         end
     end
 end
 
-local function watchChar(char)
+local function watchchar(char)
     if not char then return end
     local children = char:GetChildren()
     for i = 1, #children do
         local v = children[i]
         if v:IsA("Tool") then
-            setupTool(v)
+            setuptool(v)
         end
     end
     char.ChildAdded:Connect(function(v)
         if v:IsA("Tool") then
-            setupTool(v)
+            setuptool(v)
         end
     end)
 end
 
-LocalPlayer.CharacterAdded:Connect(watchChar)
-if LocalPlayer.Character then
-    watchChar(LocalPlayer.Character)
+localPlayer.CharacterAdded:Connect(watchchar)
+if localPlayer.Character then
+    watchchar(localPlayer.Character)
 end
 
--- Rapid Fire
-local IsFiring = false
-local LastRapidFire = 0
+-- rapid fire
+local isfiring = false
+local lastrapidfire = 0
 
-local function getRapidGun()
-    local char = LocalPlayer.Character
+local function getrapidgun()
+    local char = localPlayer.Character
     if not char then return nil end
     for _, tool in next, char:GetChildren() do
         if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then
@@ -1282,7 +1486,7 @@ local function getRapidGun()
     return nil
 end
 
-local function patchTool(tool)
+local function patchtool(tool)
     pcall(function()
         for _, conn in pairs(getconnections(tool.Activated)) do
             local info = debug.getinfo(conn.Function)
@@ -1296,45 +1500,60 @@ local function patchTool(tool)
     end)
 end
 
-local function onCharRapidFire(char)
-    IsFiring = false
+local function oncharrapidfire(char)
+    isfiring = false
     char.ChildAdded:Connect(function(tool)
-        if tool:IsA("Tool") and getSetting({'Player Modification', 'Rapid Fire', 'Enabled'}, false) then
-            patchTool(tool)
+        if tool:IsA("Tool") and getgenv().wizprivate['rapid fire']['enabled'] then
+            patchtool(tool)
         end
     end)
 end
 
-local function rapidFire()
-    if not getSetting({'Player Modification', 'Rapid Fire', 'Enabled'}, false) then
-        IsFiring = false
+local function rapidfire()
+    if not getgenv().wizprivate['rapid fire']['enabled'] then
+        isfiring = false
         return
     end
 
-    if not IsFiring then return end
-    if tick() - LastRapidFire < getSetting({'Player Modification', 'Rapid Fire', 'Delay'}, 0.000001) then return end
+    if not isfiring then return end
+    if tick() - lastrapidfire < getgenv().wizprivate['rapid fire']['delay'] then return end
 
-    local gun = getRapidGun()
+    local gun = getrapidgun()
     if not gun then return end
 
+    if getgenv().wizprivate['rapid fire']['specific weapons']['enabled'] then
+        local valid = false
+        for _, wname in pairs(getgenv().wizprivate['rapid fire']['specific weapons']['weapons']) do
+            local clean = wname:gsub("%[", ""):gsub("%]", "")
+            if gun.Name == wname or gun.Name:find(clean) then
+                valid = true
+                break
+            end
+        end
+        if not valid then
+            isfiring = false
+            return
+        end
+    end
+
     gun:Activate()
-    LastRapidFire = tick()
+    lastrapidfire = tick()
 end
 
-LocalPlayer.CharacterAdded:Connect(onCharRapidFire)
-if LocalPlayer.Character then
-    onCharRapidFire(LocalPlayer.Character)
+localPlayer.CharacterAdded:Connect(oncharrapidfire)
+if localPlayer.Character then
+    oncharrapidfire(localPlayer.Character)
 end
 
--- Speed and Jump Modifications
-local SpeedEnabled = false
-local SuperJumpEnabled = false
-local InfAmmoEnabled = false
-local NoCooldownEnabled = false
+-- speed modifications
+local speedenabled = false
+local superjumpenabled = false
+local infammoenabled = false
+local nocooldownenabled = false
 
--- Get currently equipped gun
+-- get the currently equipped gun (has Ammo value)
 local function getEquippedGun()
-    local char = LocalPlayer.Character
+    local char = localPlayer.Character
     if not char then return nil end
     for _, tool in ipairs(char:GetChildren()) do
         if tool:IsA("Tool") and tool:FindFirstChild("Ammo") then
@@ -1344,9 +1563,11 @@ local function getEquippedGun()
     return nil
 end
 
--- Zero cooldown upvalues
+-- zero every number upvalue across all Activated/MouseButton connections on the tool
+-- this kills firerate delays, cooldown timers, and reload locks in Das Hood
 local function nukeToolCooldowns(tool)
     pcall(function()
+        -- Activated connections (main fire handler)
         for _, conn in pairs(getconnections(tool.Activated)) do
             local ok, info = pcall(debug.getinfo, conn.Function)
             if ok and info then
@@ -1358,92 +1579,35 @@ local function nukeToolCooldowns(tool)
                 end
             end
         end
+        -- LocalScripts inside the tool also carry cooldown state
+        for _, obj in ipairs(tool:GetDescendants()) do
+            if obj:IsA("LocalScript") then
+                local ok, conns = pcall(getconnections, obj.Changed)
+                if ok then
+                    for _, conn in ipairs(conns) do
+                        local ok2, info = pcall(debug.getinfo, conn.Function)
+                        if ok2 and info then
+                            for i = 1, info.nups do
+                                local ok3, _, val = pcall(debug.getupvalue, conn.Function, i)
+                                if ok3 and type(val) == "number" and val > 0 then
+                                    pcall(debug.setupvalue, conn.Function, i, 0)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end)
 end
 
--- Panic Ground
-local function panicGround()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChild("Humanoid")
-    if not hrp or not hum then return end
-    
-    local mode = getSetting({'Panic Ground', 'Mode'}, 'Instant')
-    local preserveVelocity = getSetting({'Panic Ground', 'Preserve Velocity'}, true)
-    
-    if mode == "Instant" then
-        local currentVel = preserveVelocity and hrp.Velocity or Vector3.new(0, 0, 0)
-        hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, 0, math.rad(90))
-        if preserveVelocity then
-            hrp.Velocity = currentVel
-        end
-    else
-        -- Smooth mode implementation would go here
-        hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, 0, math.rad(90))
-    end
-end
-
--- Spiderman Wall Jump
-local function spidermanWallJump()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local hum = char:FindFirstChild("Humanoid")
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return end
-    
-    local wallDistance = getSetting({'Spiderman', 'Wall Distance'}, 6)
-    local jumpPower = getSetting({'Spiderman', 'Jump Power'}, 75)
-    local requireDoubleJump = getSetting({'Spiderman', 'Require Double Jump'}, true)
-    
-    -- Check if near wall
-    local params = RaycastParams.new()
-    params.FilterDescendantsInstances = {char}
-    params.FilterType = Enum.RaycastFilterType.Blacklist
-    
-    local forward = hrp.CFrame.LookVector
-    local result = Workspace:Raycast(hrp.Position, forward * wallDistance, params)
-    
-    if result and hum:GetState() == Enum.HumanoidStateType.Freefall then
-        if not requireDoubleJump or hum.Jump then
-            hum.JumpPower = jumpPower
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-    end
-end
-
--- Inventory Sorter
-local function sortInventory()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not backpack then return end
-    
-    local sortOrder = getSetting({'Player Modification', 'Inventory Sorter', 'Order'}, {})
-    local sortFood = getSetting({'Player Modification', 'Inventory Sorter', 'Sort Food'}, true)
-    
-    -- Sort weapons according to order
-    for i, weaponName in ipairs(sortOrder) do
-        local weapon = backpack:FindFirstChild(weaponName)
-        if weapon then
-            weapon.Parent = char
-            wait(0.1)
-            weapon.Parent = backpack
-        end
-    end
-end
-
--- Main RenderStepped loop
 RunService.RenderStepped:Connect(function()
-    rapidFire()
+    rapidfire()
 
     local gun = getEquippedGun()
 
-    -- Infinite ammo
-    if InfAmmoEnabled and getSetting({'inf ammo', 'enabled'}, false) then
+    -- infinite ammo: pin Ammo to 30 every single frame, no threshold logic
+    if infammoenabled and getgenv().wizprivate['inf ammo']['enabled'] then
         if gun then
             local ammo = gun:FindFirstChild("Ammo")
             if ammo then
@@ -1452,321 +1616,564 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- No cooldown
-    if NoCooldownEnabled and getSetting({'no cooldown', 'enabled'}, false) then
+    -- no cooldown: nuke all cooldown upvalues every frame so they can never accumulate
+    if nocooldownenabled and getgenv().wizprivate['no cooldown']['enabled'] then
         if gun then
             nukeToolCooldowns(gun)
         end
     end
 
-    -- Speed modifications
-    if getSetting({'Player Modification', 'Movement', 'Speed Modifications', 'Enabled'}, true) and SpeedEnabled then
-        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+    if superjumpenabled and getgenv().wizprivate['super jump']['enabled'] then
+        local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
         if hum then
-            hum.WalkSpeed = 16 * getSetting({'Player Modification', 'Movement', 'Speed Modifications', 'Value'}, 8)
+            if hum.JumpPower ~= getgenv().wizprivate['super jump']['jump power'] then
+                hum.JumpPower = getgenv().wizprivate['super jump']['jump power']
+            end
         end
     end
 
-    -- Super jump
-    if SuperJumpEnabled and getSetting({'super jump', 'enabled'}, false) then
-        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+    if getgenv().wizprivate['Speed Modifications']['Enabled'] and speedenabled then
+        local hum = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
         if hum then
-            hum.JumpPower = getSetting({'super jump', 'jump power'}, 100)
+            hum.WalkSpeed = 16 * getgenv().wizprivate['Speed Modifications']['Normal']['Multiplier']
         end
     end
 
-    -- Spiderman
-    if getSetting({'Spiderman', 'Enabled'}, true) then
-        spidermanWallJump()
+    if getgenv().wizprivate['hitbox expander']['enabled'] then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer and player.Character then
+                local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Size = Vector3.new(
+                        getgenv().wizprivate['hitbox expander']['size'],
+                        getgenv().wizprivate['hitbox expander']['size'],
+                        getgenv().wizprivate['hitbox expander']['size']
+                    )
+                    hrp.Transparency = 1
+                end
+            end
+        end
     end
 
-    refreshESP()
+    refreshesp()
 end)
 
--- Input handling
-local SelectPressed = false
-local CamPressed = false
-local TriggerPressed = false
-local SpeedPressed = false
+-- input handling
+local selectPressed = false
+local camPressed = false
+local triggerPressed = false
+local speedPressed = false
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     local key = input.KeyCode
-    local keybinds = getSetting({'Main', 'Keybinds'}, {})
-    
-    local selectBind = keybinds['Lock Target'] or 'Z'
-    local camBind = keybinds['Aim Assist'] or 'P'
-    local triggerBind = keybinds['Trigger Bot Activate'] or 'C'
-    local speedBind = keybinds['Speed'] or 'B'
-    local panicBind = keybinds['Panic'] or 'L'
-    local panicGroundBind = keybinds['Panic Ground'] or 'X'
-    local espBind = keybinds['ESP Toggle'] or 'T'
-    local inventoryBind = keybinds['Inventory Sorter'] or 'F2'
+    local selectBind = getgenv().wizprivate["Binds"].Select
+    local camBind = getgenv().wizprivate["Binds"]["Camera Aimbot"]
+    local triggerBind = getgenv().wizprivate["Binds"].Triggerbot
+    local speedBind = getgenv().wizprivate["Binds"].Speed
+    local targetMode = getgenv().wizprivate['Targeting']['Target Mode']
 
-    if key == Enum.KeyCode.LeftControl then 
-        LeftCtrlHeld = true 
-        return 
-    end
+    if key == Enum.KeyCode.LeftControl then leftCtrlHeld = true return end
 
-    -- Select target
-    if key == Enum.KeyCode[selectBind] then
-        if not SelectPressed then
-            SelectPressed = true
-            if TargetPlayer then
-                TargetPlayer = nil
+    if key == Enum.KeyCode[selectBind] and targetMode == 'Select' then
+        if not selectPressed then
+            selectPressed = true
+            if targetPlayer then
+                targetPlayer = nil
                 destroyTargetUI()
+                pcall(function()
+                    if targetCache.Hitbox then targetCache.Hitbox:Destroy() end
+                    if targetCache.Box then targetCache.Box:Destroy() end
+                    if targetCache.Trigger then targetCache.Trigger:Destroy() end
+                    if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() end
+                end)
             else
-                TargetPlayer = getBestTarget()
-                if TargetPlayer and TargetPlayer.Character then
+                targetPlayer = getBestTarget()
+                if targetPlayer and targetPlayer.Character then
                     updateTargetVisuals()
-                    showTargetUI(TargetPlayer)
+                    showTargetUI(targetPlayer)
                 end
             end
         end
     end
 
-    -- Camera aimbot
     if key == Enum.KeyCode[camBind] then
-        if not CamPressed then
-            CamPressed = true
-            CamLockActive = not CamLockActive
-            if CamLockActive then
-                CamLockTarget = TargetPlayer
-                if CamLockTarget and CamLockTarget.Character then
-                    CamLockPart = getCamlockBodyPart(CamLockTarget.Character)
+        if not camPressed then
+            camPressed = true
+            local mode = getgenv().wizprivate['Camera Aimbot'].Mode
+            if mode == "Toggle" then
+                camLockActive = not camLockActive
+                if camLockActive then
+                    camLockTarget = targetPlayer
+                    if camLockTarget and camLockTarget.Character then
+                        camLockPart = getCamlockBodyPart(camLockTarget.Character)
+                    end
+                else
+                    camLockTarget = nil
+                    camLockPart = nil
                 end
-            else
-                CamLockTarget = nil
-                CamLockPart = nil
+            elseif mode == "Hold" then
+                camLockHold = true
+                camLockActive = true
+                camLockTarget = targetPlayer
+                if camLockTarget and camLockTarget.Character then
+                    camLockPart = getCamlockBodyPart(camLockTarget.Character)
+                end
             end
         end
     end
 
-    -- Triggerbot
     if key == Enum.KeyCode[triggerBind] then
-        if not TriggerPressed then
-            TriggerPressed = true
-            TriggerBotActive = not TriggerBotActive
-        end
-    end
-
-    -- Speed
-    if key == Enum.KeyCode[speedBind] then
-        if not SpeedPressed then
-            SpeedPressed = true
-            SpeedEnabled = not SpeedEnabled
-        end
-    end
-
-    -- Panic
-    if key == Enum.KeyCode[panicBind] then
-        -- Disable all features
-        SpeedEnabled = false
-        SuperJumpEnabled = false
-        InfAmmoEnabled = false
-        NoCooldownEnabled = false
-        CamLockActive = false
-        TriggerBotActive = false
-        TargetPlayer = nil
-        destroyTargetUI()
-    end
-
-    -- Panic Ground
-    if key == Enum.KeyCode[panicGroundBind] then
-        panicGround()
-    end
-
-    -- ESP Toggle
-    if key == Enum.KeyCode[espBind] then
-        local currentSetting = getSetting({'Raid Awareness', 'Name', 'Enabled'}, true)
-        -- Toggle would require modifying the config, for now just print
-        print("ESP Toggle:", not currentSetting)
-    end
-
-    -- Inventory Sorter
-    if key == Enum.KeyCode[inventoryBind] then
-        sortInventory()
-    end
-
-    -- Mouse inputs
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if getSetting({'Player Modification', 'Rapid Fire', 'Enabled'}, false) then
-            local gun = getRapidGun()
-            if gun then
-                IsFiring = true
+        if not triggerPressed then
+            triggerPressed = true
+            local mode = getgenv().wizprivate['Trigger Bot'].Settings.Mode
+            if mode == "Toggle" then
+                triggerBotActive = not triggerBotActive
+            elseif mode == "Hold" then
+                triggerHold = true
             end
         end
     end
 
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        RightClickHeld = true
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.LeftControl then
-        LeftCtrlHeld = false
-    end
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        RightClickHeld = false
-    end
-
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        IsFiring = false
-    end
-
-    local keybinds = getSetting({'Main', 'Keybinds'}, {})
-    local camBind = keybinds['Aim Assist'] or 'P'
-    local triggerBind = keybinds['Trigger Bot Activate'] or 'C'
-    local selectBind = keybinds['Lock Target'] or 'Z'
-    local speedBind = keybinds['Speed'] or 'B'
-
-    if input.KeyCode == Enum.KeyCode[camBind] then
-        CamPressed = false
-    end
-
-    if input.KeyCode == Enum.KeyCode[triggerBind] then
-        TriggerPressed = false
-    end
-
-    if input.KeyCode == Enum.KeyCode[selectBind] then
-        SelectPressed = false
-    end
-
-    if input.KeyCode == Enum.KeyCode[speedBind] then
-        SpeedPressed = false
-    end
-end)
-
--- Main loop
-RunService.RenderStepped:Connect(function()
-    local targetMode = getSetting({'Target', 'Type'}, "Automatic")
-
-    if targetMode == "Automatic" then
-        local best = getBestTarget()
-        if best ~= TargetPlayer then
-            TargetPlayer = best
+    if key == Enum.KeyCode[speedBind] then
+        if not speedPressed then
+            speedPressed = true
+            if getgenv().wizprivate["Speed Modifications"]['Enabled'] then
+                speedenabled = not speedenabled
+            end
         end
     end
 
-    if clearTargetIfInvalid() then
-        CurrentTargetPlayer = nil
-        return
+    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['Super Jump']] then
+        if getgenv().wizprivate['super jump']['enabled'] then
+            superjumpenabled = not superjumpenabled
+        end
     end
 
-    if TargetPlayer ~= CurrentTargetPlayer then
-        CurrentTargetPlayer = TargetPlayer
-        pcall(function()
-            if TargetCache.Hitbox then TargetCache.Hitbox:Destroy() TargetCache.Hitbox = nil end
-            if TargetCache.Box then TargetCache.Box:Destroy() TargetCache.Box = nil end
-            if TargetCache.Trigger then TargetCache.Trigger:Destroy() TargetCache.Trigger = nil end
-            if TargetCache.TriggerBox then TargetCache.TriggerBox:Destroy() TargetCache.TriggerBox = nil end
-        end)
+    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['Inf Ammo']] then
+        if getgenv().wizprivate['inf ammo']['enabled'] then
+            infammoenabled = not infammoenabled
+        end
     end
 
-    if not TargetPlayer or not TargetPlayer.Character then return end
+    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['No Cooldown']] then
+        if getgenv().wizprivate['no cooldown']['enabled'] then
+            nocooldownenabled = not nocooldownenabled
+        end
+    end
 
-    local root = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-
-    updateTargetVisuals()
-
-    -- Triggerbot
-    if getSetting({'Triggerbot', 'Enabled'}, true) and not LeftCtrlHeld then
-        local targetKnocked = getSetting({'Target Checks', 'Knocked'}, true) and isTargetKnocked(TargetPlayer)
-        if not targetKnocked then
-            local active = TriggerBotActive
-            if active then
-                local now = tick()
-                local delay = getTriggerbotDelay()
-                if delay > 0 and (now - LastTriggerTime) < delay then return end
-
-                local inRange = isMouseInTriggerFOV() or isMouseInTriggerHitbox()
-
-                if inRange then
-                    local hitData = getClosestBodyPart(TargetPlayer.Character)
-
-                    if hitData and hitData.Part then
-                        local visible = not getSetting({'Target Checks', 'Wall'}, true) or 
-                                       isVisible(Camera.CFrame.Position, hitData.Part, TargetPlayer.Character)
-                        if visible then
-                            triggerbot()
-                            LastTriggerTime = now
-                        end
+    if key == Enum.KeyCode[getgenv().wizprivate["Binds"]['ESP']] then
+        getgenv().wizprivate['esp']['enabled'] = not getgenv().wizprivate['esp']['enabled']
+        if getgenv().wizprivate['esp']['enabled'] then
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    if not esplabels[player.UserId] then
+                        addesp(player)
                     end
                 end
             end
         end
     end
 
-    -- Target line
-    updateTargetLine()
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if getgenv().wizprivate['rapid fire']['enabled'] then
+            local gun = getrapidgun()
+            if gun then
+                isfiring = true
+            end
+        end
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        rightClickHeld = true
+    end
 end)
 
--- Camera aimbot
-local CamFOVCircle = nil
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        leftCtrlHeld = false
+    end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        rightClickHeld = false
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isfiring = false
+    end
+
+    local camBind = getgenv().wizprivate["Binds"]["Camera Aimbot"]
+    local mode = getgenv().wizprivate['Camera Aimbot'].Mode
+    if input.KeyCode == Enum.KeyCode[camBind] then
+        camPressed = false
+        if mode == "Hold" then
+            camLockHold = false
+            camLockActive = false
+            camLockTarget = nil
+            camLockPart = nil
+        end
+    end
+
+    if input.KeyCode == Enum.KeyCode[getgenv().wizprivate["Binds"].Triggerbot] then
+        if getgenv().wizprivate['Trigger Bot'].Settings.Mode == "Hold" then
+            triggerHold = false
+        end
+        triggerPressed = false
+    end
+
+    if input.KeyCode == Enum.KeyCode[getgenv().wizprivate["Binds"].Select] then
+        selectPressed = false
+    end
+
+    if input.KeyCode == Enum.KeyCode[getgenv().wizprivate["Binds"].Speed] then
+        speedPressed = false
+    end
+end)
+
+-- main loop
+RunService.RenderStepped:Connect(function()
+    local mode = getgenv().wizprivate['Targeting']['Target Mode']
+
+    if mode == "Automatic" then
+        local best = getBestTarget()
+        if best ~= targetPlayer then
+            targetPlayer = best
+        end
+    end
+
+    if clearTargetIfInvalid() then
+        currentTargetPlayer = nil
+        return
+    end
+
+    if targetPlayer ~= currentTargetPlayer then
+        currentTargetPlayer = targetPlayer
+        pcall(function()
+            if targetCache.Hitbox then targetCache.Hitbox:Destroy() targetCache.Hitbox = nil end
+            if targetCache.Box then targetCache.Box:Destroy() targetCache.Box = nil end
+            if targetCache.Trigger then targetCache.Trigger:Destroy() targetCache.Trigger = nil end
+            if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() targetCache.TriggerBox = nil end
+        end)
+    end
+
+    if not targetPlayer or not targetPlayer.Character then return end
+
+    local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    local upperTorso = targetPlayer.Character:FindFirstChild("UpperTorso")
+    local basePos = upperTorso and upperTorso.Position or root.Position
+    local look = root.CFrame.LookVector
+    local facing = CFrame.lookAt(Vector3.new(), Vector3.new(look.X, 0, look.Z))
+
+    local showSilent = getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV']
+    local showTrigger = getgenv().wizprivate['Trigger Bot'].FOV['Show FOV']
+
+    local weaponCategory = getWeaponCategory()
+    local silentFOV = getSplitFOV('Silent Aimbot')
+    local triggerFOV = getSplitFOV('Trigger Bot')
+
+    local function applySilentFOV()
+        if not showSilent then
+            if targetCache.Hitbox then targetCache.Hitbox:Destroy() targetCache.Hitbox = nil end
+            if targetCache.Box then targetCache.Box:Destroy() targetCache.Box = nil end
+            return
+        end
+
+        if not targetCache.Hitbox then
+            targetCache.Hitbox = Instance.new("Part")
+            targetCache.Hitbox.Name = "SilentHitbox_" .. targetPlayer.Name
+            targetCache.Hitbox.Anchored = true
+            targetCache.Hitbox.CanCollide = false
+            targetCache.Hitbox.Transparency = 1
+            targetCache.Hitbox.CanQuery = false
+            targetCache.Hitbox.Parent = Workspace
+        end
+
+        local size = Vector3.new(
+            silentFOV.xLeft + silentFOV.xRight,
+            silentFOV.yUpper + silentFOV.yLower,
+            silentFOV.zLeft + silentFOV.zRight
+        )
+        local offset = Vector3.new(
+            (silentFOV.xRight - silentFOV.xLeft)/2,
+            (silentFOV.yUpper - silentFOV.yLower)/2,
+            (silentFOV.zRight - silentFOV.zLeft)/2
+        )
+        local worldOffset = facing:VectorToWorldSpace(offset)
+
+        targetCache.Hitbox.Size = size
+        targetCache.Hitbox.CFrame = CFrame.new(basePos + worldOffset) * facing
+
+        if not targetCache.Box then
+            targetCache.Box = Instance.new("BoxHandleAdornment")
+            targetCache.Box.Adornee = targetCache.Hitbox
+            targetCache.Box.AlwaysOnTop = true
+            targetCache.Box.ZIndex = 10
+            targetCache.Box.Transparency = 0.7
+            targetCache.Box.Size = size
+            targetCache.Box.Parent = targetCache.Hitbox
+        end
+        targetCache.Box.Color3 = isMouseInSilentFOV() and Color3.new(0,1,0) or Color3.new(1,0,0)
+    end
+
+    local function applyTriggerFOV()
+        if not showTrigger then
+            if targetCache.Trigger then targetCache.Trigger:Destroy() targetCache.Trigger = nil end
+            if targetCache.TriggerBox then targetCache.TriggerBox:Destroy() targetCache.TriggerBox = nil end
+            return
+        end
+
+        if not targetCache.Trigger then
+            targetCache.Trigger = Instance.new("Part")
+            targetCache.Trigger.Name = "TriggerHitbox_" .. targetPlayer.Name
+            targetCache.Trigger.Anchored = true
+            targetCache.Trigger.CanCollide = false
+            targetCache.Trigger.Transparency = 1
+            targetCache.Trigger.CanQuery = false
+            targetCache.Trigger.Parent = Workspace
+        end
+
+        local pred = getgenv().wizprivate['Trigger Bot'].Prediction
+        local predPos = root.Position
+        if root.Velocity.Magnitude > 1 then
+            predPos = predPos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
+        end
+
+        local size = Vector3.new(
+            triggerFOV.xLeft + triggerFOV.xRight,
+            triggerFOV.yUpper + triggerFOV.yLower,
+            triggerFOV.zLeft + triggerFOV.zRight
+        )
+        local offset = Vector3.new(
+            (triggerFOV.xRight - triggerFOV.xLeft)/2,
+            (triggerFOV.yUpper - triggerFOV.yLower)/2,
+            (triggerFOV.zRight - triggerFOV.zLeft)/2
+        )
+        local worldOffset = facing:VectorToWorldSpace(offset)
+        local upperPos = upperTorso and upperTorso.Position or predPos
+
+        targetCache.Trigger.Size = size
+        targetCache.Trigger.CFrame = CFrame.new(upperPos + worldOffset) * facing
+
+        if not targetCache.TriggerBox then
+            targetCache.TriggerBox = Instance.new("BoxHandleAdornment")
+            targetCache.TriggerBox.Adornee = targetCache.Trigger
+            targetCache.TriggerBox.AlwaysOnTop = true
+            targetCache.TriggerBox.ZIndex = 10
+            targetCache.TriggerBox.Transparency = 0.7
+            targetCache.TriggerBox.Size = size
+            targetCache.TriggerBox.Parent = targetCache.Trigger
+        end
+        targetCache.TriggerBox.Color3 = isMouseInTriggerFOV() and Color3.new(0,1,0) or Color3.new(1,1,1)
+    end
+
+    applySilentFOV()
+    applyTriggerFOV()
+
+    if getgenv().wizprivate['Trigger Bot'].Enabled and not leftCtrlHeld then
+        -- don't shoot while target is knocked — wait for them to get back up
+        local targetKnocked = getgenv().wizprivate.Checks['Knock Check'] and isTargetKnocked(targetPlayer)
+        if not targetKnocked then
+        local cfg = getgenv().wizprivate['Trigger Bot'].Settings
+        local isSelectMode = (mode == "Select")
+        local forceTrigger = isSelectMode and getgenv().wizprivate['Select Only Features']['Force Trigger']
+        local forceHit = isSelectMode and getgenv().wizprivate['Select Only Features']['Force Hit']
+
+        local active = forceTrigger or (cfg.Mode == "Always") or (cfg.Mode == "Hold" and triggerHold) or (cfg.Mode == "Toggle" and triggerBotActive)
+        if active then
+            local now = tick()
+            local delay = getTriggerbotDelay()
+            if delay > 0 and (now - lastTriggerTime) < delay then return end
+
+            local inRange = forceTrigger or 
+                           (cfg.Type == "FOV" and isMouseInTriggerFOV()) or 
+                           (cfg.Type == "Hitbox" and isMouseInTriggerHitbox())
+
+            if inRange then
+                local hitData
+                if forceHit then
+                    local head = targetPlayer.Character:FindFirstChild("Head")
+                    if head and head:IsA("BasePart") then
+                        hitData = { Part = head, Position = head.Position }
+                    end
+                else
+                    hitData = getClosestBodyPart(targetPlayer.Character)
+                end
+
+                if hitData and hitData.Part then
+                    local visible = not getgenv().wizprivate.Checks['Visible Check'] or 
+                                   isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character)
+                    if visible then
+                        triggerbot()
+                        lastTriggerTime = now
+                    end
+                end
+            end
+        end
+        end -- end not targetKnocked
+    end
+
+    -- target line
+    updatetargetline()
+end)
+
+-- camera aimbot
+local camFOVCircle = nil
 RunService.Heartbeat:Connect(function(dt)
-    local camcfg = getSetting({'Aim Assist'}, {})
-    if not (camcfg.Enabled and CamLockActive and CamLockTarget and CamLockTarget.Character) then 
-        if CamFOVCircle then CamFOVCircle:Remove() CamFOVCircle = nil end
+    local camcfg = getgenv().wizprivate['Camera Aimbot']
+    if not (camcfg.Enabled and camLockActive and camLockTarget and camLockTarget.Character) then 
+        if camFOVCircle then camFOVCircle:Remove() camFOVCircle = nil end
         return 
     end
 
     if clearTargetIfInvalid() then return end
 
-    local root = CamLockTarget.Character:FindFirstChild("HumanoidRootPart")
+    local root = camLockTarget.Character:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    if getSetting({'Self Checks', 'Knocked'}, false) and isSelfKnocked() then return end
+    if getgenv().wizprivate.Checks["Self Knock Check"] and isSelfKnocked() then return end
 
-    local newPart = getCamlockBodyPart(CamLockTarget.Character)
+    local zoom = (camera.CFrame.Position - camera.Focus.Position).Magnitude
+    local isFP = zoom < 1
+    local isTP = zoom >= 1
+    local cond = camcfg['Camera Aimbot Conditions']
+    local allowed = (cond['First Person'] and isFP or cond['Third Person'] and isTP) and (not cond['Right Click'] or rightClickHeld)
+    if not allowed then return end
+
+    local newPart = getCamlockBodyPart(camLockTarget.Character)
     if not newPart then return end
 
-    if tick() - LastCamUpdate < CAM_UPDATE_RATE then return end
-    LastCamUpdate = tick()
+    local radius = tonumber(camcfg.FOV.Radius) or 155
+    local mousePos = UserInputService:GetMouseLocation()
+    local screenPos = camera:WorldToViewportPoint(newPart.Position)
+    if screenPos.Z <= 0 or (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude > radius then return end
 
-    local targetPos = newPart.Position
-    local smoothX, smoothY = getCameraSmoothness((Camera.CFrame.Position - root.Position).Magnitude)
+    if not cond['Wall'] then
+        local visible = isVisible(camera.CFrame.Position, newPart.Part, camLockTarget.Character)
+        if not visible then return end
+        camLockPart = newPart
+    else
+        camLockPart = newPart
+    end
 
-    local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
+    local campart = camLockPart
+
+    if tick() - lastCamUpdate < CAM_UPDATE_RATE then return end
+    lastCamUpdate = tick()
+
+    local targetPos = campart.Position
+
+    local distance = (camera.CFrame.Position - root.Position).Magnitude
+    local smoothX, smoothY = getCameraSmoothness(distance)
+
+    local humanize = camcfg.Humanize
+    local targetCF = CFrame.new(camera.CFrame.Position, targetPos)
+
+    if humanize.Bezier and humanize.Enabled then
+        local scale = math.clamp(humanize.Scale or 0.25, 0, 1)
+        local chaos = scale * 15
+        local control = camera.CFrame.Position:Lerp(targetPos, 0.5) 
+                      + Vector3.new(math.random(-chaos, chaos), math.random(-chaos, chaos), math.random(-chaos, chaos))
+        local t = (tick() % 1)
+        local p1 = camera.CFrame.Position
+        local p2 = control
+        local p3 = targetPos
+        local bezier = p1:Lerp(p2, t):Lerp(p3, t)
+        targetCF = CFrame.new(camera.CFrame.Position, bezier)
+        smoothX *= (1 - scale * 0.6)
+        smoothY *= (1 - scale * 0.6)
+    end
 
     local factorX = 1 - math.exp(-smoothX * dt * 60)
     local factorY = 1 - math.exp(-smoothY * dt * 60)
     local alpha = math.max(factorX, factorY)
-    Camera.CFrame = Camera.CFrame:Lerp(targetCF, alpha)
+    camera.CFrame = camera.CFrame:Lerp(targetCF, alpha)
+
+    if camcfg.FOV['Show FOV'] then
+        if not camFOVCircle then
+            camFOVCircle = Drawing.new("Circle")
+            camFOVCircle.Thickness = 1.5
+            camFOVCircle.Filled = false
+            camFOVCircle.Transparency = 1
+            camFOVCircle.Color = Color3.new(1, 1, 1)
+            camFOVCircle.Visible = true
+        end
+        local mouseLoc = UserInputService:GetMouseLocation()
+        camFOVCircle.Position = Vector2.new(mouseLoc.X, mouseLoc.Y)
+        camFOVCircle.Radius = radius
+    elseif camFOVCircle then
+        camFOVCircle:Remove()
+        camFOVCircle = nil
+    end
 end)
-
--- Silent aimbot
-local OriginalIndex
-OriginalIndex = hookmetamethod(game, "__index", function(t, k)
-    if not (getSetting({'Silent Aimbot', 'Enabled'}, true) and t == Mouse and TargetPlayer and TargetPlayer.Character) then
-        return OriginalIndex(t, k)
+-- silent aimbot
+local originalIndex
+originalIndex = hookmetamethod(game, "__index", function(t, k)
+    if not (getgenv().wizprivate['Silent Aimbot'].Enabled and t == mouse and targetPlayer and targetPlayer.Character) then
+        return originalIndex(t, k)
     end
 
-    if getSetting({'Target Checks', 'Knocked'}, true) and isTargetKnocked(TargetPlayer) then
-        return OriginalIndex(t, k)
+    -- keep target locked but don't redirect bullets while they're knocked
+    if getgenv().wizprivate.Checks['Knock Check'] and isTargetKnocked(targetPlayer) then
+        return originalIndex(t, k)
     end
 
-    local shouldCheckFOV = true
-    local inFOV = not getSetting({'Silent Aimbot', 'FOV', 'Visualize'}, false) or isMouseInSilentFOV()
-    local alwaysHit = shouldCheckFOV and inFOV
+    local targetMode = getgenv().wizprivate['Targeting']['Target Mode']
+    local isSelectMode = targetMode == "Select"
+    local forceHit = isSelectMode and getgenv().wizprivate['Select Only Features']['Force Hit']
 
-    if not alwaysHit then return OriginalIndex(t, k) end
+    local shouldCheckFOV = not forceHit
+    local inFOV = not getgenv().wizprivate['Silent Aimbot'].FOV['Show FOV'] or isMouseInSilentFOV()
+    local alwaysHit = forceHit or (shouldCheckFOV and inFOV)
 
-    local hitData = getClosestBodyPart(TargetPlayer.Character)
+    if not alwaysHit then return originalIndex(t, k) end
+
+    local hitData
+    if forceHit then
+        local head = targetPlayer.Character:FindFirstChild("Head")
+        if head and head:IsA("BasePart") then
+            hitData = { Part = head, Position = head.Position }
+        end
+    else
+        hitData = getClosestBodyPart(targetPlayer.Character)
+    end
 
     if not hitData or not hitData.Part then
-        return OriginalIndex(t, k)
+        return originalIndex(t, k)
     end
 
-    if not isVisible(Camera.CFrame.Position, hitData.Part, TargetPlayer.Character) then
-        return OriginalIndex(t, k)
+    if not (forceHit or isVisible(camera.CFrame.Position, hitData.Part, targetPlayer.Character)) then
+        return originalIndex(t, k)
+    end
+
+    local antiCurve = getgenv().wizprivate["Anti Curve"]
+    if antiCurve.Enabled then
+        local cameraDir = camera.CFrame.LookVector
+        local toTarget = (hitData.Position - camera.CFrame.Position).Unit
+        local dot = cameraDir:Dot(toTarget)
+        local angle = math.deg(math.acos(math.clamp(dot, -1, 1)))
+        local antiCurveAngle = antiCurve.Angle or 0.5
+        
+        if antiCurve['Weapon Configuration'].Enabled then
+            local tool = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
+            if tool then
+                local name = tool.Name:gsub("[%[%]]", "")
+                local wc = antiCurve['Weapon Configuration']
+                if ShotgunNames[name] then antiCurveAngle = wc.Shotguns.Angle
+                elseif PistolNames[name] then antiCurveAngle = wc.Pistols.Angle
+                elseif AutomaticNames[name] then antiCurveAngle = wc.Automatics.Angle
+                elseif RifleNames[name] then antiCurveAngle = wc.Rifles.Angle
+                else antiCurveAngle = wc.Others.Angle end
+            end
+        end
+        
+        if angle > antiCurveAngle then return originalIndex(t, k) end
     end
 
     if k == "Hit" then
         local pos = hitData.Position
-        local pred = getSetting({'Silent Aimbot', 'Prediction'}, {})
-        local root = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local pred = getgenv().wizprivate['Silent Aimbot'].Prediction
+        local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
         if root and (pred.X ~= 0 or pred.Y ~= 0 or pred.Z ~= 0) then
             pos = pos + root.Velocity * Vector3.new(pred.X, pred.Y, pred.Z)
         end
@@ -1775,54 +2182,41 @@ OriginalIndex = hookmetamethod(game, "__index", function(t, k)
         return hitData.Part
     end
 
-    return OriginalIndex(t, k)
+    return originalIndex(t, k)
 end)
 
--- Panic Ground Feature
-local function panicGround()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local hum = char:FindFirstChild("Humanoid")
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not hum or not root then return end
-    
-    local panicConfig = getSetting({'Panic Ground'}, {})
-    if not panicConfig.Enabled then return end
-    
-    if panicConfig.Mode == 'Instant' then
-        -- Instant ground slam
-        root.CFrame = CFrame.new(root.Position.X, 0, root.Position.Z)
-        if panicConfig.PreserveVelocity then
-            hum:Move(root.CFrame.Position + Vector3.new(0, 0.1, 0))
+-- spread modifications
+local oldrandom
+oldrandom = hookfunction(math.random, function(...)
+    local args = {...}
+    if checkcaller() then
+        return oldrandom(...)
+    end
+
+    if (#args == 0) or (args[1] == -0.05 and args[2] == 0.05) or (args[1] == -0.1) or (args[1] == -0.05) then
+        if getgenv().wizprivate['spread modifications']['enabled'] then
+            if getgenv().wizprivate['spread modifications']['specific weapons']['enabled'] then
+                local tool = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Tool")
+                if tool then
+                    local wname = tool.Name
+                    local found = false
+
+                    for _, weapon in pairs(getgenv().wizprivate['spread modifications']['specific weapons']['weapons']) do
+                        if wname == weapon then
+                            found = true
+                            break
+                        end
+                    end
+
+                    if found then
+                        return oldrandom(...) * (getgenv().wizprivate['spread modifications']['amount'] / 100)
+                    end
+                end
+            else
+                return oldrandom(...) * (getgenv().wizprivate['spread modifications']['amount'] / 100)
+            end
         end
-    else
-        -- Smooth ground slam
-        local targetY = 0
-        local currentY = root.Position.Y
-        local speed = panicConfig.SmoothSpeed or 400
-        
-        local tween = TweenService:Create(root, TweenInfo.new(
-            (currentY - targetY) / speed,
-            Enum.EasingStyle.Quad,
-            Enum.EasingDirection.Out
-        ), {CFrame = CFrame.new(root.Position.X, targetY, root.Position.Z)})
-        
-        tween:Play()
     end
-end
 
--- Input handling for Panic Ground
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    local panicConfig = getSetting({'Panic Ground'}, {})
-    if not panicConfig.Enabled then return end
-    
-    if input.KeyCode == Enum.KeyCode[panicConfig.Key] then
-        panicGround()
-    end
+    return oldrandom(...)
 end)
-
-print("🚀 Brightside Complete Script Loaded!")
-print("✅ All features integrated: Silent Aim, Triggerbot, Skin Changer, Speed, Panic Ground, Spiderman, Inventory Sorter")
