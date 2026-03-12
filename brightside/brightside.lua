@@ -1,6 +1,6 @@
 -- ════════════════════════════════════════════════════════════
 --  BRIGHTSIDE COMPLETE SCRIPT
---  Integrated with all features from wizprivate
+--  
 -- ════════════════════════════════════════════════════════════
 
 local Players = game:GetService("Players")
